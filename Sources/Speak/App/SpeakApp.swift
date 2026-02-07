@@ -162,7 +162,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task {
             let t1 = CFAbsoluteTimeGetCurrent()
-            let result = await pipeline.stopRecordingAndTranscribe()
+            _ = await pipeline.stopRecordingAndTranscribe()
             let t2 = CFAbsoluteTimeGetCurrent()
             await MainActor.run {
                 if sendReturn && self.pipeline.didOutputText {
