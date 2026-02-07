@@ -8,11 +8,14 @@ class RecordingOverlayState {
     var isTranscribing: Bool = false
     var audioLevel: Float = 0.0
     var speechDurationSec: Double = 0.0
+    var waveformSamples: [Float] = Array(repeating: 0, count: 30)
 
     func update(audioEngine: AudioEngine) {
         isSpeaking = audioEngine.voiceActivityDetector.isSpeaking
         audioLevel = audioEngine.audioLevel
         speechDurationSec = Double(audioEngine.rawBuffer.count) / audioEngine.hardwareSampleRate
+        waveformSamples.append(min(1.0, audioLevel * 50))
+        if waveformSamples.count > 30 { waveformSamples.removeFirst(waveformSamples.count - 30) }
     }
 }
 
@@ -26,8 +29,8 @@ struct RecordingOverlayView: View {
                 .frame(width: 12, height: 12)
                 .shadow(color: dotColor.opacity(0.7), radius: state.isSpeaking ? 8 : 0)
 
-            levelMeter
-                .frame(width: 24, height: 24)
+            waveform
+                .frame(width: 48, height: 24)
 
             VStack(alignment: .leading, spacing: 1) {
                 if state.isTranscribing {
@@ -60,23 +63,29 @@ struct RecordingOverlayView: View {
         return state.isSpeaking ? .red : .orange
     }
 
-    private var levelMeter: some View {
-        HStack(spacing: 2) {
-            ForEach(0..<5, id: \.self) { i in
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(barColor(index: i))
-                    .frame(width: 3)
+    private var waveform: some View {
+        Canvas { context, size in
+            let samples = state.waveformSamples
+            let count = samples.count
+            guard count > 1 else { return }
+
+            let midY = size.height / 2
+            let barWidth = size.width / CGFloat(count)
+
+            for i in 0..<count {
+                let amp = CGFloat(samples[i])
+                let barHeight = max(2, amp * size.height * 0.9)
+                let x = CGFloat(i) * barWidth
+                let rect = CGRect(
+                    x: x,
+                    y: midY - barHeight / 2,
+                    width: max(1, barWidth - 1),
+                    height: barHeight
+                )
+                let color: Color = amp > 0.7 ? .red : (amp > 0.3 ? .green : .green.opacity(0.5))
+                context.fill(RoundedRectangle(cornerRadius: 1).path(in: rect), with: .color(color))
             }
         }
-    }
-
-    private func barColor(index: Int) -> Color {
-        let threshold = Float(index + 1) / 5.0 * 0.3
-        let active = state.audioLevel > threshold
-        if !active { return .white.opacity(0.1) }
-        if index >= 4 { return .red }
-        if index >= 3 { return .orange }
-        return .green
     }
 
     private func formatDuration(_ sec: Double) -> String {
@@ -100,6 +109,7 @@ class RecordingOverlayController {
         state.speechDurationSec = 0
         state.isSpeaking = false
         state.audioLevel = 0
+        state.waveformSamples = Array(repeating: 0, count: 30)
 
         if window == nil {
             createWindow()

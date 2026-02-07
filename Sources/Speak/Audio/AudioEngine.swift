@@ -108,6 +108,10 @@ class AudioEngine {
         }
     }
 
+    func resamplePublic(_ input: [Float]) -> [Float] {
+        resample(input, from: hardwareSampleRate, to: 16000)
+    }
+
     private func resample(_ input: [Float], from sourceSR: Double, to targetSR: Double) -> [Float] {
         guard sourceSR != targetSR, !input.isEmpty else { return input }
 

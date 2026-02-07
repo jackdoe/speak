@@ -261,6 +261,28 @@ struct SettingsView: View {
     private var generalTab: some View {
         ScrollView {
             Form {
+                if !AXIsProcessTrusted() {
+                    Section {
+                        HStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .font(.title3)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Accessibility not enabled")
+                                    .fontWeight(.medium)
+                                Text("Hotkeys and text output won't work. Open System Settings > Privacy & Security > Accessibility, remove Speak if listed, then re-add it and restart the app.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Button("Open Accessibility Settings") {
+                            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+                            NSWorkspace.shared.open(url)
+                        }
+                        .focusable(false)
+                    }
+                }
+
                 Section("Language") {
                     Picker("Language", selection: $settings.language) {
                         Text("Auto-detect").tag("auto")
@@ -297,12 +319,20 @@ struct SettingsView: View {
                         Spacer()
                         fkeyPicker(selection: $settings.sendHotkeyKeyCode)
                     }
-                    Text("Send key does the same but also presses Return after transcribing")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-
                     Toggle("Keep mic warm (instant start)", isOn: $settings.keepMicWarm)
                         .focusable(false)
+                }
+
+                Section("Transcription Mode") {
+                    Picker("Mode", selection: $settings.transcriptionMode) {
+                        ForEach(WhisperSettings.TranscriptionMode.allCases, id: \.self) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
+                    Text("Continuous outputs text each time you pause speaking")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
 
                 Section("Output Mode") {

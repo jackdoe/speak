@@ -15,9 +15,20 @@ class TranscriptionPipeline {
     var lastResult: TranscriptionResult?
 
     private var whisperContext: WhisperContext?
+    private var pendingSendReturn = false
+    private var lastContextText = ""
+    private var continuousTimer: Timer?
+    private var silenceFrameCount = 0
 
     private static let maxChunkSamples = 480_000
     private static let minSamples = 8_000
+    private static let continuousMinSamples = 24_000  // 1.5s at 16kHz
+
+    private static let hallucinationPatterns = [
+        "thank you", "thanks for watching", "thanks for listening",
+        "please subscribe", "like and subscribe", "see you next time",
+        "bye bye", "goodbye", "the end"
+    ]
 
     init() {
         applyVADSettings()
@@ -34,12 +45,20 @@ class TranscriptionPipeline {
         vad.postSpeechPaddingMs = settings.vadPostPaddingMs
     }
 
-    func startRecording() {
+    func startRecording(sendReturn: Bool = false) {
         guard !isRecording else { return }
+        pendingSendReturn = sendReturn
+        lastContextText = ""
         do {
             try audioEngine.startRecording()
             isRecording = true
-            NSLog("[Pipeline] Recording started")
+            if settings.transcriptionMode == .continuous {
+                startContinuousMonitor()
+                NSLog("[Pipeline] Continuous monitor started")
+            }
+            NSLog("[Pipeline] Recording started (mode: %@, vad: %@)",
+                  settings.transcriptionMode.rawValue,
+                  settings.vadEnabled ? "on" : "off")
         } catch {
             NSLog("[Pipeline] Failed to start recording: %@", error.localizedDescription)
         }
@@ -48,46 +67,23 @@ class TranscriptionPipeline {
     func stopRecordingAndTranscribe() async -> TranscriptionResult? {
         guard isRecording else { return nil }
 
+        stopContinuousMonitor()
         let samples = audioEngine.stopRecording()
         if !settings.keepMicWarm {
             audioEngine.releaseEngine()
         }
         isRecording = false
-        NSLog("[Pipeline] Recording stopped, got %d samples (%.1fs)", samples.count, Double(samples.count) / 16000.0)
 
         guard samples.count >= Self.minSamples else {
-            NSLog("[Pipeline] Audio too short (%d samples), skipping", samples.count)
             return nil
         }
 
-        guard let ctx = whisperContext else {
-            NSLog("[Pipeline] No model loaded, cannot transcribe")
-            return nil
-        }
+        let result = await transcribeAndOutput(samples: samples)
 
-        isTranscribing = true
-        defer { isTranscribing = false }
-
-        let result: TranscriptionResult
-        if samples.count > Self.maxChunkSamples {
-            result = await transcribeChunked(ctx: ctx, samples: samples)
-        } else {
-            result = await ctx.transcribe(samples: samples)
-        }
-
-        lastResult = result
-        performanceMonitor.record(result)
-
-        NSLog("[Pipeline] Transcription done: \"%@\" (%.0fms, RTF: %.2f)",
-              result.fullText, result.transcriptionTimeMs, result.realTimeFactor)
-
-        let text = result.fullText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty {
-            switch settings.outputMode {
-            case .type:
-                TextOutput.type(text, delayMs: settings.typeSpeedMs)
-            case .paste:
-                TextOutput.paste(text, restoreClipboard: settings.restoreClipboard)
+        if pendingSendReturn, let result = result,
+           !result.fullText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                TextOutput.pressReturn()
             }
         }
 
@@ -95,9 +91,9 @@ class TranscriptionPipeline {
     }
 
     func shutdown() {
+        stopContinuousMonitor()
         whisperContext = nil
         modelManager.releaseContext()
-        NSLog("[Pipeline] Shutdown, context released")
     }
 
     func loadModel(_ model: WhisperModel) async throws {
@@ -113,6 +109,119 @@ class TranscriptionPipeline {
         whisperContext = ctx
         if let model = modelManager.currentModel {
             NSLog("[Pipeline] Auto-loaded and warmed up model: %@", model.name)
+        }
+    }
+
+    private func startContinuousMonitor() {
+        silenceFrameCount = 0
+        continuousTimer?.invalidate()
+        continuousTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
+            self?.checkVADAndTranscribe()
+        }
+    }
+
+    private func stopContinuousMonitor() {
+        continuousTimer?.invalidate()
+        continuousTimer = nil
+    }
+
+    private func checkVADAndTranscribe() {
+        let vad = audioEngine.voiceActivityDetector
+        let bufferCount = audioEngine.rawBuffer.count
+
+        if vad.isSpeaking {
+            silenceFrameCount = 0
+        } else {
+            silenceFrameCount += 1
+        }
+
+        let pauseDetected = bufferCount > 0 && silenceFrameCount >= 3
+        let bufferFull = bufferCount > Int(audioEngine.hardwareSampleRate) * 25
+
+        guard (pauseDetected || bufferFull) && !isTranscribing else { return }
+
+        let samples = audioEngine.rawBuffer.drain()
+        let resampled = audioEngine.resamplePublic(samples)
+
+        guard resampled.count >= Self.continuousMinSamples else { return }
+
+        NSLog("[Pipeline] Continuous: pause, %d samples (%.1fs)",
+              resampled.count, Double(resampled.count) / 16000.0)
+
+        NSLog("[Pipeline] Continuous: %d samples (%.1fs)",
+              resampled.count, Double(resampled.count) / 16000.0)
+
+        Task { @MainActor in
+            guard let ctx = self.whisperContext else { return }
+            self.isTranscribing = true
+
+            let prompt = self.lastContextText.isEmpty ? nil : String(self.lastContextText.suffix(200))
+            let result = await ctx.transcribe(samples: resampled, contextPrompt: prompt)
+
+            self.isTranscribing = false
+
+            let text = result.fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty, !Self.isHallucination(text) else {
+                if !text.isEmpty { NSLog("[Pipeline] Filtered: \"%@\"", text) }
+                return
+            }
+
+            self.lastContextText += " " + text
+            if self.lastContextText.count > 500 {
+                self.lastContextText = String(self.lastContextText.suffix(300))
+            }
+
+            self.lastResult = result
+            self.performanceMonitor.record(result)
+            self.outputText(text)
+
+            NSLog("[Pipeline] Continuous: \"%@\" (%.0fms, RTF: %.2f)",
+                  text, result.transcriptionTimeMs, result.realTimeFactor)
+        }
+    }
+
+    private static func isHallucination(_ text: String) -> Bool {
+        let lower = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        if lower.count < 3 { return true }
+        for pattern in hallucinationPatterns {
+            if lower.contains(pattern) { return true }
+        }
+        return false
+    }
+
+    private func transcribeAndOutput(samples: [Float]) async -> TranscriptionResult? {
+        guard let ctx = whisperContext else { return nil }
+
+        isTranscribing = true
+        defer { isTranscribing = false }
+
+        let result: TranscriptionResult
+        if samples.count > Self.maxChunkSamples {
+            result = await transcribeChunked(ctx: ctx, samples: samples)
+        } else {
+            result = await ctx.transcribe(samples: samples)
+        }
+
+        lastResult = result
+        performanceMonitor.record(result)
+
+        NSLog("[Pipeline] Transcription: \"%@\" (%.0fms, RTF: %.2f)",
+              result.fullText, result.transcriptionTimeMs, result.realTimeFactor)
+
+        let text = result.fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty {
+            outputText(text)
+        }
+
+        return result
+    }
+
+    private func outputText(_ text: String) {
+        switch settings.outputMode {
+        case .type:
+            TextOutput.type(text, delayMs: settings.typeSpeedMs)
+        case .paste:
+            TextOutput.paste(text, restoreClipboard: settings.restoreClipboard)
         }
     }
 
@@ -142,8 +251,6 @@ class TranscriptionPipeline {
         }
 
         let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000.0
-        NSLog("[Pipeline] Chunked transcription: %d chunks, %.0fms total", chunkIndex, elapsed)
-
         return TranscriptionResult(
             segments: allSegments,
             audioDurationMs: totalAudioDurationMs,

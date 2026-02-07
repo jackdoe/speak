@@ -21,8 +21,10 @@ class VoiceActivityDetector {
     var preSpeechPaddingMs: Int
     var postSpeechPaddingMs: Int
 
+    private var activeSampleRate: Int = 16000
+
     private var preSpeechBuffer: [Float] = []
-    private var preSpeechMaxSamples: Int { preSpeechPaddingMs * 16000 / 1000 }
+    private var preSpeechMaxSamples: Int { preSpeechPaddingMs * activeSampleRate / 1000 }
 
     private var onsetBuffer: [Float] = []
 
@@ -30,10 +32,10 @@ class VoiceActivityDetector {
     private var silenceSampleCount: Int = 0
 
     private var postSpeechBuffer: [Float] = []
-    private var postSpeechMaxSamples: Int { postSpeechPaddingMs * 16000 / 1000 }
+    private var postSpeechMaxSamples: Int { postSpeechPaddingMs * activeSampleRate / 1000 }
 
-    private var minSpeechSamples: Int { minSpeechDurationMs * 16000 / 1000 }
-    private var minSilenceSamples: Int { minSilenceDurationMs * 16000 / 1000 }
+    private var minSpeechSamples: Int { minSpeechDurationMs * activeSampleRate / 1000 }
+    private var minSilenceSamples: Int { minSilenceDurationMs * activeSampleRate / 1000 }
 
     init(settings: WhisperSettings = WhisperSettings()) {
         self.speechThreshold = settings.vadSpeechThreshold
@@ -47,6 +49,7 @@ class VoiceActivityDetector {
     func process(samples: [Float], sampleRate: Int = 16000) -> [Float] {
         guard isEnabled else { return samples }
 
+        activeSampleRate = sampleRate
         let frameSize = sampleRate * 30 / 1000
         var output: [Float] = []
         var offset = 0
@@ -72,8 +75,11 @@ class VoiceActivityDetector {
         silenceSampleCount = 0
     }
 
+    private var frameCount: Int = 0
+
     private func processFrame(_ frame: [Float]) -> [Float] {
         let rms = computeRMS(frame)
+        let prevState = state
         var output: [Float] = []
 
         switch state {
@@ -137,6 +143,16 @@ class VoiceActivityDetector {
                 silenceSampleCount = 0
                 state = .speaking
             }
+        }
+
+        frameCount += 1
+        if state != prevState {
+            NSLog("[VAD] %@ → %@ rms=%.5f thresh=%.4f/%.4f sr=%d out=%d",
+                  "\(prevState)", "\(state)", rms, speechThreshold, silenceThreshold,
+                  activeSampleRate, output.count)
+        } else if frameCount % 100 == 0 {
+            NSLog("[VAD] %@ rms=%.5f out=%d buf=%d",
+                  "\(state)", rms, output.count, preSpeechBuffer.count + onsetBuffer.count + postSpeechBuffer.count)
         }
 
         return output

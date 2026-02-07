@@ -46,14 +46,14 @@ actor WhisperContext {
         NSLog("[WhisperContext] Warmup complete (%.0fms)", elapsed)
     }
 
-    func transcribe(samples: [Float]) -> TranscriptionResult {
+    func transcribe(samples: [Float], contextPrompt: String? = nil) -> TranscriptionResult {
         let start = CFAbsoluteTimeGetCurrent()
 
         var params = whisper_full_default_params(settings.strategy.whisperStrategy)
 
         params.n_threads = Int32(settings.resolvedThreadCount)
         params.translate = settings.translate
-        params.no_context = settings.noContext
+        params.no_context = contextPrompt == nil ? settings.noContext : false
         params.no_timestamps = settings.noTimestamps
         params.single_segment = settings.singleSegment
         params.token_timestamps = settings.tokenTimestamps
@@ -74,9 +74,10 @@ actor WhisperContext {
         params.language = UnsafePointer(languageCStr)
         defer { free(languageCStr) }
 
+        let prompt = contextPrompt ?? (settings.initialPrompt.isEmpty ? nil : settings.initialPrompt)
         let promptCStr: UnsafeMutablePointer<CChar>?
-        if !settings.initialPrompt.isEmpty {
-            promptCStr = settings.initialPrompt.withCString { strdup($0) }
+        if let prompt = prompt {
+            promptCStr = prompt.withCString { strdup($0) }
             params.initial_prompt = UnsafePointer(promptCStr)
         } else {
             promptCStr = nil

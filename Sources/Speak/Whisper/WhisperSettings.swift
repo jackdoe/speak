@@ -39,8 +39,8 @@ struct WhisperSettings: Codable, Equatable {
     var noSpeechThreshold: Float = 0.6
 
     var vadEnabled: Bool = true
-    var vadSpeechThreshold: Float = 0.002
-    var vadSilenceThreshold: Float = 0.001
+    var vadSpeechThreshold: Float = 0.007
+    var vadSilenceThreshold: Float = 0.003
     var vadMinSpeechMs: Int = 60
     var vadMinSilenceMs: Int = 600
     var vadPrePaddingMs: Int = 200
@@ -54,6 +54,8 @@ struct WhisperSettings: Codable, Equatable {
     var sendHotkeyKeyCode: UInt16 = 0x67
     var keepMicWarm: Bool = true
 
+    var transcriptionMode: TranscriptionMode = .buffered
+
     var launchAtLogin: Bool = false
 
     var showOverlay: Bool = true
@@ -62,6 +64,11 @@ struct WhisperSettings: Codable, Equatable {
     enum OutputMode: String, Codable, CaseIterable, Equatable {
         case type = "Type (simulate keyboard)"
         case paste = "Paste (clipboard + Cmd+V)"
+    }
+
+    enum TranscriptionMode: String, Codable, CaseIterable, Equatable {
+        case buffered = "Buffered (transcribe on release)"
+        case continuous = "Continuous (transcribe on each pause)"
     }
 
     enum OverlayPosition: String, Codable, CaseIterable, Equatable {

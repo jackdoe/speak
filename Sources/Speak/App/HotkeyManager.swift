@@ -4,11 +4,12 @@ import CoreGraphics
 class HotkeyManager {
     var onKeyDown: ((_ isSend: Bool) -> Void)?
     var onKeyUp: ((_ isSend: Bool) -> Void)?
-
     fileprivate var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     fileprivate var isKeyDown = false
     fileprivate var activeKeyWasSend = false
+
+    var isRunning: Bool { eventTap != nil }
 
     fileprivate var primaryKeyCode: UInt16 = 0x6F
     fileprivate var sendKeyCode: UInt16 = 0x67
@@ -101,6 +102,7 @@ private func hotkeyCallback(
 
     let isPrimary = keyCode == manager.primaryKeyCode
     let isSend = keyCode == manager.sendKeyCode
+
     guard isPrimary || isSend else {
         return Unmanaged.passUnretained(event)
     }

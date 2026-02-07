@@ -46,7 +46,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func wireCallbacks() {
         hotkeyManager.onKeyDown = { [weak self] isSend in
-            self?.handleKeyDown()
+            self?.handleKeyDown(sendReturn: isSend)
         }
         hotkeyManager.onKeyUp = { [weak self] isSend in
             self?.handleKeyUp(sendReturn: isSend)
@@ -121,9 +121,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("[SpeakApp] Launch complete")
     }
 
-    private func handleKeyDown() {
+    private func handleKeyDown(sendReturn: Bool = false) {
         let t0 = CFAbsoluteTimeGetCurrent()
-        pipeline.startRecording()
+        pipeline.startRecording(sendReturn: sendReturn)
         let t1 = CFAbsoluteTimeGetCurrent()
         statusBarController.state = .recording
         let t2 = CFAbsoluteTimeGetCurrent()
@@ -170,6 +170,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func openSettings(tab: Int? = nil) {
+        if !AXIsProcessTrusted() {
+            AXIsProcessTrustedWithOptions(
+                [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
+            )
+        }
+
+        if !hotkeyManager.isRunning {
+            if hotkeyManager.start() {
+                NSLog("[SpeakApp] Hotkey manager restarted after permission change")
+            }
+        }
+
         let modelName = pipeline.modelManager.currentModel?.name ?? ""
         let modelPath = pipeline.modelManager.currentModel?.path ?? ""
         SettingsWindowController.shared.showSettings(
