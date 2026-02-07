@@ -14,7 +14,7 @@ class RecordingOverlayState {
         isSpeaking = audioEngine.voiceActivityDetector.isSpeaking
         audioLevel = audioEngine.audioLevel
         speechDurationSec = Double(audioEngine.rawBuffer.count) / audioEngine.hardwareSampleRate
-        waveformSamples.append(min(1.0, audioLevel * 50))
+        waveformSamples.append(min(1.0, audioLevel * 30))
         if waveformSamples.count > 30 { waveformSamples.removeFirst(waveformSamples.count - 30) }
     }
 }

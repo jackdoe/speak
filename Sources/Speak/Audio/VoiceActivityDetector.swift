@@ -75,11 +75,8 @@ class VoiceActivityDetector {
         silenceSampleCount = 0
     }
 
-    private var frameCount: Int = 0
-
     private func processFrame(_ frame: [Float]) -> [Float] {
         let rms = computeRMS(frame)
-        let prevState = state
         var output: [Float] = []
 
         switch state {
@@ -143,16 +140,6 @@ class VoiceActivityDetector {
                 silenceSampleCount = 0
                 state = .speaking
             }
-        }
-
-        frameCount += 1
-        if state != prevState {
-            NSLog("[VAD] %@ → %@ rms=%.5f thresh=%.4f/%.4f sr=%d out=%d",
-                  "\(prevState)", "\(state)", rms, speechThreshold, silenceThreshold,
-                  activeSampleRate, output.count)
-        } else if frameCount % 100 == 0 {
-            NSLog("[VAD] %@ rms=%.5f out=%d buf=%d",
-                  "\(state)", rms, output.count, preSpeechBuffer.count + onsetBuffer.count + postSpeechBuffer.count)
         }
 
         return output

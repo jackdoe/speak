@@ -22,11 +22,15 @@ class StatusBarController {
     var isMicWarm: Bool = false {
         didSet { rebuildMenu() }
     }
+    var isContinuousMode: Bool = false {
+        didSet { rebuildMenu() }
+    }
 
     var onSettingsClicked: (() -> Void)?
     var onModelSelected: ((String) -> Void)?
     var onDownloadMoreClicked: (() -> Void)?
     var onMicWarmToggled: ((Bool) -> Void)?
+    var onContinuousModeToggled: ((Bool) -> Void)?
     var onSetupClicked: (() -> Void)?
 
     func setup() {
@@ -93,6 +97,11 @@ class StatusBarController {
 
         newMenu.addItem(NSMenuItem.separator())
 
+        let continuousItem = NSMenuItem(title: "Continuous Mode", action: #selector(continuousModeToggled(_:)), keyEquivalent: "")
+        continuousItem.target = self
+        continuousItem.state = isContinuousMode ? .on : .off
+        newMenu.addItem(continuousItem)
+
         let micWarmItem = NSMenuItem(title: "Keep Mic Warm", action: #selector(micWarmToggled(_:)), keyEquivalent: "")
         micWarmItem.target = self
         micWarmItem.state = isMicWarm ? .on : .off
@@ -116,6 +125,11 @@ class StatusBarController {
     @objc private func settingsClicked(_ sender: NSMenuItem) {
         NSLog("[StatusBar] Settings clicked")
         onSettingsClicked?()
+    }
+
+    @objc private func continuousModeToggled(_ sender: NSMenuItem) {
+        isContinuousMode.toggle()
+        onContinuousModeToggled?(isContinuousMode)
     }
 
     @objc private func micWarmToggled(_ sender: NSMenuItem) {

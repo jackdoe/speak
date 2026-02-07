@@ -13,9 +13,9 @@ class TranscriptionPipeline {
     var isRecording = false
     var isTranscribing = false
     var lastResult: TranscriptionResult?
+    private(set) var didOutputText = false
 
     private var whisperContext: WhisperContext?
-    private var pendingSendReturn = false
     private var lastContextText = ""
     private var continuousTimer: Timer?
     private var silenceFrameCount = 0
@@ -45,10 +45,10 @@ class TranscriptionPipeline {
         vad.postSpeechPaddingMs = settings.vadPostPaddingMs
     }
 
-    func startRecording(sendReturn: Bool = false) {
+    func startRecording() {
         guard !isRecording else { return }
-        pendingSendReturn = sendReturn
         lastContextText = ""
+        didOutputText = false
         do {
             try audioEngine.startRecording()
             isRecording = true
@@ -79,14 +79,6 @@ class TranscriptionPipeline {
         }
 
         let result = await transcribeAndOutput(samples: samples)
-
-        if pendingSendReturn, let result = result,
-           !result.fullText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                TextOutput.pressReturn()
-            }
-        }
-
         return result
     }
 
@@ -145,9 +137,6 @@ class TranscriptionPipeline {
 
         guard resampled.count >= Self.continuousMinSamples else { return }
 
-        NSLog("[Pipeline] Continuous: pause, %d samples (%.1fs)",
-              resampled.count, Double(resampled.count) / 16000.0)
-
         NSLog("[Pipeline] Continuous: %d samples (%.1fs)",
               resampled.count, Double(resampled.count) / 16000.0)
 
@@ -162,7 +151,7 @@ class TranscriptionPipeline {
 
             let text = result.fullText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty, !Self.isHallucination(text) else {
-                if !text.isEmpty { NSLog("[Pipeline] Filtered: \"%@\"", text) }
+                if !text.isEmpty { NSLog("[Pipeline] Filtered hallucination") }
                 return
             }
 
@@ -173,10 +162,10 @@ class TranscriptionPipeline {
 
             self.lastResult = result
             self.performanceMonitor.record(result)
-            self.outputText(text)
+            self.outputText(text + " ")
 
-            NSLog("[Pipeline] Continuous: \"%@\" (%.0fms, RTF: %.2f)",
-                  text, result.transcriptionTimeMs, result.realTimeFactor)
+            NSLog("[Pipeline] Continuous: %d chars (%.0fms, RTF: %.2f)",
+                  text.count, result.transcriptionTimeMs, result.realTimeFactor)
         }
     }
 
@@ -205,8 +194,8 @@ class TranscriptionPipeline {
         lastResult = result
         performanceMonitor.record(result)
 
-        NSLog("[Pipeline] Transcription: \"%@\" (%.0fms, RTF: %.2f)",
-              result.fullText, result.transcriptionTimeMs, result.realTimeFactor)
+        NSLog("[Pipeline] Transcription: %d chars (%.0fms, RTF: %.2f)",
+              result.fullText.count, result.transcriptionTimeMs, result.realTimeFactor)
 
         let text = result.fullText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty {
@@ -217,6 +206,7 @@ class TranscriptionPipeline {
     }
 
     private func outputText(_ text: String) {
+        didOutputText = true
         switch settings.outputMode {
         case .type:
             TextOutput.type(text, delayMs: settings.typeSpeedMs)

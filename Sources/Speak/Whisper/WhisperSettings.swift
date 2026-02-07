@@ -47,14 +47,16 @@ struct WhisperSettings: Codable, Equatable {
     var vadPostPaddingMs: Int = 300
 
     var outputMode: OutputMode = .paste
-    var typeSpeedMs: Int = 1
+    var typeSpeedMs: Int = 5
     var restoreClipboard: Bool = true
+    var sendReturnDelayMs: Int = 200
 
     var hotkeyKeyCode: UInt16 = 0x6F
     var sendHotkeyKeyCode: UInt16 = 0x67
     var keepMicWarm: Bool = true
 
-    var transcriptionMode: TranscriptionMode = .buffered
+    var transcriptionMode: TranscriptionMode = .continuous
+    var releaseDelayMs: Int = 300
 
     var launchAtLogin: Bool = false
 

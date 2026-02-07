@@ -65,6 +65,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             OnboardingWindowController.shared.show()
         }
         statusBarController.isMicWarm = pipeline.settings.keepMicWarm
+        statusBarController.isContinuousMode = pipeline.settings.transcriptionMode == .continuous
+        statusBarController.onContinuousModeToggled = { [weak self] enabled in
+            guard let self = self else { return }
+            self.pipeline.settings.transcriptionMode = enabled ? .continuous : .buffered
+            self.pipeline.settings.save()
+        }
         statusBarController.onMicWarmToggled = { [weak self] enabled in
             guard let self = self else { return }
             self.pipeline.settings.keepMicWarm = enabled
@@ -92,6 +98,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         statusBarController.isMicWarm = pipeline.settings.keepMicWarm
+        statusBarController.isContinuousMode = pipeline.settings.transcriptionMode == .continuous
         if pipeline.settings.keepMicWarm {
             do { try pipeline.audioEngine.prepare() } catch {
                 NSLog("[SpeakApp] Failed to pre-warm audio: %@", error.localizedDescription)
@@ -123,7 +130,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleKeyDown(sendReturn: Bool = false) {
         let t0 = CFAbsoluteTimeGetCurrent()
-        pipeline.startRecording(sendReturn: sendReturn)
+        pipeline.startRecording()
         let t1 = CFAbsoluteTimeGetCurrent()
         statusBarController.state = .recording
         let t2 = CFAbsoluteTimeGetCurrent()
@@ -140,6 +147,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleKeyUp(sendReturn: Bool = false) {
+        let delayMs = pipeline.settings.releaseDelayMs
+        let delay = Double(delayMs) / 1000.0
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.finishRecording(sendReturn: sendReturn)
+        }
+    }
+
+    private func finishRecording(sendReturn: Bool) {
         let t0 = CFAbsoluteTimeGetCurrent()
         statusBarController.state = .transcribing
         RecordingOverlayController.shared.setTranscribing()
@@ -149,8 +165,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let result = await pipeline.stopRecordingAndTranscribe()
             let t2 = CFAbsoluteTimeGetCurrent()
             await MainActor.run {
-                if sendReturn, let result = result, !result.fullText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                if sendReturn && self.pipeline.didOutputText {
+                    let returnDelay = Double(self.pipeline.settings.sendReturnDelayMs) / 1000.0
+                    DispatchQueue.main.asyncAfter(deadline: .now() + returnDelay) {
                         TextOutput.pressReturn()
                     }
                 }
@@ -195,6 +212,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.pipeline.settings = newSettings
                 self?.hotkeyManager.setKeyCodes(primary: newSettings.hotkeyKeyCode, send: newSettings.sendHotkeyKeyCode)
                 self?.statusBarController.isMicWarm = newSettings.keepMicWarm
+                self?.statusBarController.isContinuousMode = newSettings.transcriptionMode == .continuous
             },
             onModelDownloaded: { [weak self] in
                 guard let self = self else { return }

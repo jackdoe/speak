@@ -333,6 +333,17 @@ struct SettingsView: View {
                     Text("Continuous outputs text each time you pause speaking")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+
+                    Stepper(
+                        "Release delay: \(settings.releaseDelayMs) ms",
+                        value: $settings.releaseDelayMs,
+                        in: 0...1000,
+                        step: 50
+                    )
+                    .focusable(false)
+                    Text("Extra recording time after key release to avoid clipping")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
 
                 Section("Output Mode") {
@@ -347,8 +358,8 @@ struct SettingsView: View {
                         Stepper(
                             "Typing speed: \(settings.typeSpeedMs) ms/char",
                             value: $settings.typeSpeedMs,
-                            in: 0...50,
-                            step: 1
+                            in: 0...200,
+                            step: 5
                         )
                         .focusable(false)
                     }
@@ -357,6 +368,17 @@ struct SettingsView: View {
                         Toggle("Restore clipboard after paste", isOn: $settings.restoreClipboard)
                             .focusable(false)
                     }
+
+                    Stepper(
+                        "Send Return delay: \(settings.sendReturnDelayMs) ms",
+                        value: $settings.sendReturnDelayMs,
+                        in: 0...1000,
+                        step: 50
+                    )
+                    .focusable(false)
+                    Text("Delay before pressing Return after output (Talk + Send hotkey)")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
 
                 Section("Recording Overlay") {
