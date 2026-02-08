@@ -1,4 +1,4 @@
-.PHONY: whisper build run clean app install uninstall benchmark resolve
+.PHONY: whisper build run clean app install uninstall benchmark resolve linux linux-install linux-clean
 
 APP_NAME = Speak
 BIN_DIR = $(shell swift build -c release --show-bin-path 2>/dev/null || echo .build/arm64-apple-macosx/release)
@@ -94,3 +94,22 @@ models-large-turbo-q5:
 	@mkdir -p Resources/models
 	@echo "Downloading ggml-large-v3-turbo-q5_0.bin (547 MB)..."
 	@curl -L --progress-bar -o Resources/models/ggml-large-v3-turbo-q5_0.bin "$(HF_BASE)/ggml-large-v3-turbo-q5_0.bin"
+
+LINUX_BUILD = linux/build
+
+linux:
+	@mkdir -p $(LINUX_BUILD)
+	cd $(LINUX_BUILD) && cmake .. && make -j$$(nproc)
+	@echo ""
+	@echo "Built: $(LINUX_BUILD)/speak"
+
+linux-install: linux
+	@mkdir -p $(HOME)/.local/bin
+	@cp $(LINUX_BUILD)/speak $(HOME)/.local/bin/speak
+	@mkdir -p $(HOME)/.config/autostart
+	@cp linux/speak.desktop $(HOME)/.config/autostart/speak.desktop
+	@mkdir -p $(HOME)/.local/share/speak/models
+	@echo "Installed speak to ~/.local/bin/speak"
+
+linux-clean:
+	rm -rf $(LINUX_BUILD)
