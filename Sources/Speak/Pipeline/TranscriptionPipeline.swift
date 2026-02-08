@@ -155,6 +155,11 @@ class TranscriptionPipeline {
                 return
             }
 
+            if Self.isPromptEcho(text, context: self.lastContextText) {
+                NSLog("[Pipeline] Filtered prompt echo")
+                return
+            }
+
             self.lastContextText += " " + text
             if self.lastContextText.count > 500 {
                 self.lastContextText = String(self.lastContextText.suffix(300))
@@ -167,6 +172,14 @@ class TranscriptionPipeline {
             NSLog("[Pipeline] Continuous: %d chars (%.0fms, RTF: %.2f)",
                   text.count, result.transcriptionTimeMs, result.realTimeFactor)
         }
+    }
+
+    private static func isPromptEcho(_ text: String, context: String) -> Bool {
+        guard context.count >= 10 else { return false }
+        let t = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.count >= 10 else { return false }
+        let c = context.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return c.contains(t)
     }
 
     private static func isHallucination(_ text: String) -> Bool {
