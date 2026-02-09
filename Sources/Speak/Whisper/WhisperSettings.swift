@@ -27,16 +27,20 @@ struct WhisperSettings: Codable, Equatable {
     var flashAttention: Bool = true
 
     var noContext: Bool = true
-    var singleSegment: Bool = false
-    var noTimestamps: Bool = false
+    var singleSegment: Bool = true
+    var noTimestamps: Bool = true
     var tokenTimestamps: Bool = false
     var suppressBlank: Bool = true
-    var suppressNonSpeechTokens: Bool = true
+    var suppressNonSpeechTokens: Bool = false
     var initialPrompt: String = ""
+    var temperatureInc: Float = 0.2
+    var carryInitialPrompt: Bool = true
 
-    var entropyThreshold: Float = 2.4
+    var entropyThreshold: Float = 2.0
     var logprobThreshold: Float = -1.0
     var noSpeechThreshold: Float = 0.6
+
+    var sileroVADEnabled: Bool = true
 
     var vadEnabled: Bool = true
     var vadSpeechThreshold: Float = 0.007
@@ -53,6 +57,7 @@ struct WhisperSettings: Codable, Equatable {
 
     var hotkeyKeyCode: UInt16 = 0x6F
     var sendHotkeyKeyCode: UInt16 = 0x67
+    var inputGain: Float = 1.0
     var keepMicWarm: Bool = true
 
     var transcriptionMode: TranscriptionMode = .continuous
@@ -82,7 +87,7 @@ struct WhisperSettings: Codable, Equatable {
 
     var resolvedThreadCount: Int {
         if threadCount > 0 { return threadCount }
-        return max(1, min(8, ProcessInfo.processInfo.processorCount - 2))
+        return max(1, min(4, ProcessInfo.processInfo.processorCount - 2))
     }
 
     private static let defaultsKey = "WhisperSettings"

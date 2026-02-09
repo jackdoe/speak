@@ -11,6 +11,7 @@ class AudioEngine {
     private let vad = VoiceActivityDetector()
     private var isEngineRunning = false
     private var isCollecting = false
+    var inputGain: Float = 1.0
 
     let rawBuffer = RingBuffer()
     private(set) var hardwareSampleRate: Double = 48000
@@ -62,8 +63,9 @@ class AudioEngine {
         guard !rawSamples.isEmpty else { return [] }
 
         let resampled = resample(rawSamples, from: hardwareSampleRate, to: 16000)
-        NSLog("[AudioEngine] Resampled to %d samples (%.1fs at 16kHz)", resampled.count, Double(resampled.count) / 16000.0)
-        return resampled
+        let normalized = normalize(resampled)
+        NSLog("[AudioEngine] Resampled to %d samples (%.1fs at 16kHz)", normalized.count, Double(normalized.count) / 16000.0)
+        return normalized
     }
 
     static func requestPermission() async -> Bool {
@@ -91,11 +93,17 @@ class AudioEngine {
         let frameCount = Int(pcmBuffer.frameLength)
         guard frameCount > 0 else { return }
 
-        let samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameCount))
+        var samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameCount))
 
-        var sumSq: Float = 0
-        for s in samples { sumSq += s * s }
-        let rms = min(1.0, sqrtf(sumSq / Float(frameCount)))
+        let gain = inputGain
+        if gain != 1.0 {
+            var g = gain
+            vDSP_vsmul(samples, 1, &g, &samples, 1, vDSP_Length(frameCount))
+        }
+
+        var rms: Float = 0
+        vDSP_rmsqv(samples, 1, &rms, vDSP_Length(frameCount))
+        rms = min(1.0, rms)
         DispatchQueue.main.async { [weak self] in
             self?.audioLevel = rms
         }
@@ -109,7 +117,7 @@ class AudioEngine {
     }
 
     func resamplePublic(_ input: [Float]) -> [Float] {
-        resample(input, from: hardwareSampleRate, to: 16000)
+        normalize(resample(input, from: hardwareSampleRate, to: 16000))
     }
 
     private func resample(_ input: [Float], from sourceSR: Double, to targetSR: Double) -> [Float] {
@@ -119,14 +127,26 @@ class AudioEngine {
         let outputCount = Int(Double(input.count) / ratio)
         guard outputCount > 0 else { return [] }
 
+        var indices = [Float](repeating: 0, count: outputCount)
+        var base: Float = 0
+        var step = Float(ratio)
+        vDSP_vramp(&base, &step, &indices, 1, vDSP_Length(outputCount))
+
         var output = [Float](repeating: 0, count: outputCount)
-        for i in 0..<outputCount {
-            let srcIdx = Double(i) * ratio
-            let idx0 = Int(srcIdx)
-            let frac = Float(srcIdx - Double(idx0))
-            let idx1 = min(idx0 + 1, input.count - 1)
-            output[i] = input[idx0] * (1.0 - frac) + input[idx1] * frac
+        input.withUnsafeBufferPointer { buf in
+            vDSP_vlint(buf.baseAddress!, &indices, 1, &output, 1, vDSP_Length(outputCount), vDSP_Length(input.count))
         }
+        return output
+    }
+
+    private func normalize(_ samples: [Float]) -> [Float] {
+        guard !samples.isEmpty else { return samples }
+        var peak: Float = 0
+        vDSP_maxmgv(samples, 1, &peak, vDSP_Length(samples.count))
+        guard peak > 0 else { return samples }
+        var scale = 1.0 / peak
+        var output = [Float](repeating: 0, count: samples.count)
+        vDSP_vsmul(samples, 1, &scale, &output, 1, vDSP_Length(samples.count))
         return output
     }
 }

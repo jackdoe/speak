@@ -60,6 +60,8 @@ actor WhisperContext {
         params.suppress_blank = settings.suppressBlank
         params.suppress_nst = settings.suppressNonSpeechTokens
         params.temperature = settings.temperature
+        params.temperature_inc = settings.temperatureInc
+        params.carry_initial_prompt = settings.carryInitialPrompt
         params.entropy_thold = settings.entropyThreshold
         params.logprob_thold = settings.logprobThreshold
         params.no_speech_thold = settings.noSpeechThreshold
@@ -84,6 +86,17 @@ actor WhisperContext {
             params.initial_prompt = nil
         }
         defer { free(promptCStr) }
+
+        let vadModelPath = ModelManager.vadModelPath
+        let vadCStr: UnsafeMutablePointer<CChar>?
+        if settings.sileroVADEnabled && ModelManager.vadModelExists {
+            params.vad = true
+            vadCStr = vadModelPath.withCString { strdup($0) }
+            params.vad_model_path = UnsafePointer(vadCStr)
+        } else {
+            vadCStr = nil
+        }
+        defer { free(vadCStr) }
 
         let result = samples.withUnsafeBufferPointer { buffer in
             whisper_full(ctx, params, buffer.baseAddress, Int32(buffer.count))
@@ -114,7 +127,23 @@ actor WhisperContext {
             }
             let t0 = whisper_full_get_segment_t0(ctx, i) * 10
             let t1 = whisper_full_get_segment_t1(ctx, i) * 10
-            segments.append(TranscriptionSegment(text: text, startTime: t0, endTime: t1))
+
+            let noSpeechProb = whisper_full_get_segment_no_speech_prob(ctx, i)
+
+            let nTokens = whisper_full_n_tokens(ctx, i)
+            var tokenProbSum: Float = 0
+            for j in 0..<nTokens {
+                tokenProbSum += whisper_full_get_token_p(ctx, i, j)
+            }
+            let avgTokenProb = nTokens > 0 ? tokenProbSum / Float(nTokens) : 0
+
+            segments.append(TranscriptionSegment(
+                text: text,
+                startTime: t0,
+                endTime: t1,
+                noSpeechProb: noSpeechProb,
+                avgTokenProb: avgTokenProb
+            ))
         }
 
         return TranscriptionResult(

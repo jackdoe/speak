@@ -66,6 +66,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         statusBarController.isMicWarm = pipeline.settings.keepMicWarm
         statusBarController.isContinuousMode = pipeline.settings.transcriptionMode == .continuous
+        statusBarController.inputGain = pipeline.settings.inputGain
+        pipeline.audioEngine.inputGain = pipeline.settings.inputGain
+        statusBarController.onInputGainChanged = { [weak self] gain in
+            guard let self = self else { return }
+            self.pipeline.settings.inputGain = gain
+            self.pipeline.audioEngine.inputGain = gain
+            self.pipeline.settings.save()
+        }
         statusBarController.onContinuousModeToggled = { [weak self] enabled in
             guard let self = self else { return }
             self.pipeline.settings.transcriptionMode = enabled ? .continuous : .buffered
@@ -99,6 +107,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusBarController.isMicWarm = pipeline.settings.keepMicWarm
         statusBarController.isContinuousMode = pipeline.settings.transcriptionMode == .continuous
+        statusBarController.inputGain = pipeline.settings.inputGain
+        pipeline.audioEngine.inputGain = pipeline.settings.inputGain
         if pipeline.settings.keepMicWarm {
             do { try pipeline.audioEngine.prepare() } catch {
                 NSLog("[SpeakApp] Failed to pre-warm audio: %@", error.localizedDescription)

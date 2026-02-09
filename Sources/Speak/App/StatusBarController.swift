@@ -31,6 +31,8 @@ class StatusBarController {
     var onDownloadMoreClicked: (() -> Void)?
     var onMicWarmToggled: ((Bool) -> Void)?
     var onContinuousModeToggled: ((Bool) -> Void)?
+    var inputGain: Float = 1.0
+    var onInputGainChanged: ((Float) -> Void)?
     var onSetupClicked: (() -> Void)?
 
     func setup() {
@@ -109,6 +111,21 @@ class StatusBarController {
 
         newMenu.addItem(NSMenuItem.separator())
 
+        let gainItem = NSMenuItem()
+        let gainView = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 30))
+        let gainLabel = NSTextField(labelWithString: "Mic Gain")
+        gainLabel.font = .menuFont(ofSize: 13)
+        gainLabel.frame = NSRect(x: 14, y: 5, width: 60, height: 20)
+        let gainSlider = NSSlider(value: Double(inputGain), minValue: 0.5, maxValue: 3.0, target: self, action: #selector(gainSliderChanged(_:)))
+        gainSlider.frame = NSRect(x: 78, y: 5, width: 120, height: 20)
+        gainSlider.isContinuous = true
+        gainView.addSubview(gainLabel)
+        gainView.addSubview(gainSlider)
+        gainItem.view = gainView
+        newMenu.addItem(gainItem)
+
+        newMenu.addItem(NSMenuItem.separator())
+
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(settingsClicked(_:)), keyEquivalent: ",")
         settingsItem.target = self
         newMenu.addItem(settingsItem)
@@ -135,6 +152,12 @@ class StatusBarController {
     @objc private func micWarmToggled(_ sender: NSMenuItem) {
         isMicWarm.toggle()
         onMicWarmToggled?(isMicWarm)
+    }
+
+    @objc private func gainSliderChanged(_ sender: NSSlider) {
+        let value = Float(sender.doubleValue)
+        inputGain = value
+        onInputGainChanged?(value)
     }
 
     @objc private func setupClicked(_ sender: NSMenuItem) {

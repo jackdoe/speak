@@ -417,6 +417,14 @@ struct SettingsView: View {
                     .foregroundStyle(.tertiary)
             }
 
+            Section("Neural VAD") {
+                Toggle("Silero VAD", isOn: $settings.sileroVADEnabled)
+                    .focusable(false)
+                Text("Neural speech detection within whisper.cpp — auto-downloads 1.8 MB model on first use")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
             Section("Thresholds") {
                 HStack {
                     Text("Speech threshold")
@@ -498,6 +506,15 @@ struct SettingsView: View {
                             .frame(width: 40, alignment: .trailing)
                     }
 
+                    HStack {
+                        Text("Temp increment")
+                        Slider(value: $settings.temperatureInc, in: 0.0...1.0, step: 0.05)
+                            .focusable(false)
+                        Text(String(format: "%.2f", settings.temperatureInc))
+                            .monospacedDigit()
+                            .frame(width: 40, alignment: .trailing)
+                    }
+
                     if settings.strategy == .greedy {
                         Stepper("Best of: \(settings.bestOf)", value: $settings.bestOf, in: 1...10)
                             .focusable(false)
@@ -534,6 +551,8 @@ struct SettingsView: View {
                     Toggle("Disable timestamps", isOn: $settings.noTimestamps)
                         .focusable(false)
                     Toggle("Token-level timestamps", isOn: $settings.tokenTimestamps)
+                        .focusable(false)
+                    Toggle("Carry initial prompt across windows", isOn: $settings.carryInitialPrompt)
                         .focusable(false)
                 }
 

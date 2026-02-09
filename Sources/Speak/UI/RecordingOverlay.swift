@@ -166,21 +166,21 @@ class RecordingOverlayController {
               let screen = NSScreen.main else { return }
 
         let screenFrame = screen.visibleFrame
-        let windowSize = window.frame.size
+        let size = window.contentView?.fittingSize ?? window.frame.size
         let margin: CGFloat = 20
 
         let origin: NSPoint
         switch position {
         case .topLeft:
-            origin = NSPoint(x: screenFrame.minX + margin, y: screenFrame.maxY - windowSize.height - margin)
+            origin = NSPoint(x: screenFrame.minX + margin, y: screenFrame.maxY - size.height - margin)
         case .topRight:
-            origin = NSPoint(x: screenFrame.maxX - windowSize.width - margin, y: screenFrame.maxY - windowSize.height - margin)
+            origin = NSPoint(x: screenFrame.maxX - size.width - margin, y: screenFrame.maxY - size.height - margin)
         case .bottomLeft:
             origin = NSPoint(x: screenFrame.minX + margin, y: screenFrame.minY + margin)
         case .bottomRight:
-            origin = NSPoint(x: screenFrame.maxX - windowSize.width - margin, y: screenFrame.minY + margin)
+            origin = NSPoint(x: screenFrame.maxX - size.width - margin, y: screenFrame.minY + margin)
         }
 
-        window.setFrameOrigin(origin)
+        window.setFrame(NSRect(origin: origin, size: size), display: true)
     }
 }

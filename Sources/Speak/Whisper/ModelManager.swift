@@ -31,6 +31,29 @@ class ModelManager {
 
     private var whisperContext: WhisperContext?
 
+    private static let vadFilename = "ggml-silero-v6.2.0.bin"
+
+    static var vadModelPath: String {
+        for dir in vadSearchDirectories {
+            let path = dir.appendingPathComponent(vadFilename).path
+            if FileManager.default.fileExists(atPath: path) { return path }
+        }
+        return modelsDirectory.appendingPathComponent(vadFilename).path
+    }
+
+    static var vadModelExists: Bool {
+        FileManager.default.fileExists(atPath: vadModelPath)
+    }
+
+    private static var vadSearchDirectories: [URL] {
+        [
+            modelsDirectory,
+            Bundle.main.bundleURL.appendingPathComponent("Resources/models", isDirectory: true),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent("Resources/models", isDirectory: true),
+        ]
+    }
+
     func releaseContext() {
         whisperContext = nil
         currentModel = nil
@@ -65,11 +88,12 @@ class ModelManager {
                 continue
             }
             for file in files where file.pathExtension == "bin" {
+                let filename = file.deletingPathExtension().lastPathComponent
+                guard !filename.hasPrefix("ggml-silero") else { continue }
                 guard let attrs = try? fm.attributesOfItem(atPath: file.path),
                       let fileSize = attrs[.size] as? Int64 else {
                     continue
                 }
-                let filename = file.deletingPathExtension().lastPathComponent
                 let model = WhisperModel(
                     id: filename,
                     path: file.path,

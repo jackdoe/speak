@@ -4,6 +4,8 @@ struct TranscriptionSegment {
     let text: String
     let startTime: Int64
     let endTime: Int64
+    let noSpeechProb: Float
+    let avgTokenProb: Float
 }
 
 struct TranscriptionResult {
@@ -14,6 +16,13 @@ struct TranscriptionResult {
 
     var fullText: String {
         segments.map(\.text).joined()
+    }
+
+    var filteredText: String {
+        segments
+            .filter { !($0.noSpeechProb > 0.6 && $0.avgTokenProb < 0.3) }
+            .map(\.text)
+            .joined()
     }
 
     var realTimeFactor: Double {
