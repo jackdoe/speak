@@ -4,6 +4,7 @@ APP_NAME = Speak
 BIN_DIR = $(shell swift build -c release --show-bin-path 2>/dev/null || echo .build/arm64-apple-macosx/release)
 APP_BUNDLE = .build/$(APP_NAME).app
 INSTALL_DIR = /Applications
+SIGN_ID ?= -
 
 whisper:
 	cd whisper.cpp && cmake -B build -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DGGML_OPENMP=OFF
@@ -25,13 +26,15 @@ benchmark:
 app: build
 	@rm -rf "$(APP_BUNDLE)"
 	@mkdir -p "$(APP_BUNDLE)/Contents/MacOS"
-	@mkdir -p "$(APP_BUNDLE)/Contents/Resources"
+	@mkdir -p "$(APP_BUNDLE)/Contents/Resources/models"
 	@cp "$(BIN_DIR)/Speak" "$(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)"
 	@cp Resources/Info.plist "$(APP_BUNDLE)/Contents/"
 	@[ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$(APP_BUNDLE)/Contents/Resources/" || true
+	@[ -d Resources/models ] && cp Resources/models/*.bin "$(APP_BUNDLE)/Contents/Resources/models/" || true
 	@printf 'APPL????' > "$(APP_BUNDLE)/Contents/PkgInfo"
+	@codesign --force --sign "$(SIGN_ID)" --entitlements Resources/Speak.entitlements --options runtime "$(APP_BUNDLE)"
 	@echo ""
-	@echo "Built: $(APP_BUNDLE)"
+	@echo "Built and signed: $(APP_BUNDLE)"
 	@echo "  Install: make install"
 	@echo "  Run:     open $(APP_BUNDLE)"
 

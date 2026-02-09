@@ -66,6 +66,7 @@ class OnboardingState {
         pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             if AXIsProcessTrusted() {
                 self?.accessibilityGranted = true
+                UserDefaults.standard.set(true, forKey: "AccessibilityWasGranted")
                 self?.pollTimer?.invalidate()
                 self?.pollTimer = nil
                 self?.advanceFromPermissions()

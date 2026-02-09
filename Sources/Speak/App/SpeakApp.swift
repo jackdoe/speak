@@ -34,7 +34,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pipeline.shutdown()
     }
 
+    private static let accessibilityGrantedKey = "AccessibilityWasGranted"
+
+    private func resetStaleTCCEntryIfNeeded() {
+        let wasGranted = UserDefaults.standard.bool(forKey: Self.accessibilityGrantedKey)
+        let isGranted = AXIsProcessTrusted()
+
+        if isGranted {
+            UserDefaults.standard.set(true, forKey: Self.accessibilityGrantedKey)
+        } else if wasGranted {
+            NSLog("[SpeakApp] Stale TCC entry detected — resetting accessibility permission")
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+            task.arguments = ["reset", "Accessibility", "com.speak.app"]
+            try? task.run()
+            task.waitUntilExit()
+            UserDefaults.standard.set(false, forKey: Self.accessibilityGrantedKey)
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        resetStaleTCCEntryIfNeeded()
         statusBarController.setup()
         wireCallbacks()
 
