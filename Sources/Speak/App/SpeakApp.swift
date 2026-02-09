@@ -49,6 +49,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             task.arguments = ["reset", "Accessibility", "com.speak.app"]
             try? task.run()
             task.waitUntilExit()
+            AXIsProcessTrustedWithOptions(
+                [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
+            )
             UserDefaults.standard.set(false, forKey: Self.accessibilityGrantedKey)
         }
     }

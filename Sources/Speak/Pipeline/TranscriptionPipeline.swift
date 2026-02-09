@@ -293,7 +293,11 @@ class TranscriptionPipeline {
             }
 
             previousSuffix = String(chunkText.suffix(200))
-            offset = max(offset + 1, end - Self.overlapSamples)
+            let nextOffset = end - Self.overlapSamples
+            if samples.count - nextOffset < Self.overlapSamples {
+                break
+            }
+            offset = nextOffset
         }
 
         let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000.0

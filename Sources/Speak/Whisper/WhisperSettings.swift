@@ -60,7 +60,7 @@ struct WhisperSettings: Codable, Equatable {
     var inputGain: Float = 1.0
     var keepMicWarm: Bool = true
 
-    var transcriptionMode: TranscriptionMode = .continuous
+    var transcriptionMode: TranscriptionMode = .buffered
     var releaseDelayMs: Int = 300
 
     var launchAtLogin: Bool = false
