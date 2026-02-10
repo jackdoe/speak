@@ -13,6 +13,7 @@ class VoiceActivityDetector {
     var state: State = .silence
     var isSpeaking: Bool = false
     var isEnabled: Bool = true
+    var passthrough: Bool = false
 
     var speechThreshold: Float
     var silenceThreshold: Float
@@ -62,7 +63,7 @@ class VoiceActivityDetector {
             offset = end
         }
 
-        return output
+        return passthrough ? samples : output
     }
 
     func reset() {

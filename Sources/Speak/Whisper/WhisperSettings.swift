@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import CWhisper
 
 enum SamplingStrategy: String, Codable, CaseIterable {
@@ -68,6 +69,10 @@ struct WhisperSettings: Codable, Equatable {
     var showOverlay: Bool = true
     var overlayPosition: OverlayPosition = .bottomRight
 
+    var mouseZoneEnabled: Bool = false
+    var mouseZoneX: Double?
+    var mouseZoneY: Double?
+
     enum OutputMode: String, Codable, CaseIterable, Equatable {
         case type = "Type (simulate keyboard)"
         case paste = "Paste (clipboard + Cmd+V)"
@@ -83,6 +88,19 @@ struct WhisperSettings: Codable, Equatable {
         case topRight = "Top Right"
         case bottomLeft = "Bottom Left"
         case bottomRight = "Bottom Right"
+
+        func origin(for size: NSSize, in screenFrame: NSRect, margin: CGFloat = 20) -> NSPoint {
+            switch self {
+            case .topLeft:
+                return NSPoint(x: screenFrame.minX + margin, y: screenFrame.maxY - size.height - margin)
+            case .topRight:
+                return NSPoint(x: screenFrame.maxX - size.width - margin, y: screenFrame.maxY - size.height - margin)
+            case .bottomLeft:
+                return NSPoint(x: screenFrame.minX + margin, y: screenFrame.minY + margin)
+            case .bottomRight:
+                return NSPoint(x: screenFrame.maxX - size.width - margin, y: screenFrame.minY + margin)
+            }
+        }
     }
 
     var resolvedThreadCount: Int {

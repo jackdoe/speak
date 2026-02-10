@@ -25,12 +25,16 @@ class StatusBarController {
     var isContinuousMode: Bool = false {
         didSet { rebuildMenu() }
     }
+    var isMouseZoneEnabled: Bool = false {
+        didSet { rebuildMenu() }
+    }
 
     var onSettingsClicked: (() -> Void)?
     var onModelSelected: ((String) -> Void)?
     var onDownloadMoreClicked: (() -> Void)?
     var onMicWarmToggled: ((Bool) -> Void)?
     var onContinuousModeToggled: ((Bool) -> Void)?
+    var onMouseZoneToggled: ((Bool) -> Void)?
     var inputGain: Float = 1.0
     var onInputGainChanged: ((Float) -> Void)?
     var onSetupClicked: (() -> Void)?
@@ -109,6 +113,11 @@ class StatusBarController {
         micWarmItem.state = isMicWarm ? .on : .off
         newMenu.addItem(micWarmItem)
 
+        let mouseZoneItem = NSMenuItem(title: "Mouse Zone", action: #selector(mouseZoneToggled(_:)), keyEquivalent: "")
+        mouseZoneItem.target = self
+        mouseZoneItem.state = isMouseZoneEnabled ? .on : .off
+        newMenu.addItem(mouseZoneItem)
+
         newMenu.addItem(NSMenuItem.separator())
 
         let gainItem = NSMenuItem()
@@ -152,6 +161,11 @@ class StatusBarController {
     @objc private func micWarmToggled(_ sender: NSMenuItem) {
         isMicWarm.toggle()
         onMicWarmToggled?(isMicWarm)
+    }
+
+    @objc private func mouseZoneToggled(_ sender: NSMenuItem) {
+        isMouseZoneEnabled.toggle()
+        onMouseZoneToggled?(isMouseZoneEnabled)
     }
 
     @objc private func gainSliderChanged(_ sender: NSSlider) {

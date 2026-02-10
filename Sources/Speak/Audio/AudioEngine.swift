@@ -27,7 +27,12 @@ class AudioEngine {
         }
 
         hardwareSampleRate = hwFormat.sampleRate
-        NSLog("[AudioEngine] Hardware format: %.0f Hz, %d ch", hwFormat.sampleRate, hwFormat.channelCount)
+
+        var deviceName = "unknown"
+        if let device = AVCaptureDevice.default(for: .audio) {
+            deviceName = device.localizedName
+        }
+        NSLog("[AudioEngine] Input device: %@, format: %.0f Hz, %d ch", deviceName, hwFormat.sampleRate, hwFormat.channelCount)
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: hwFormat) {
             [weak self] (pcmBuffer, _) in
@@ -57,15 +62,21 @@ class AudioEngine {
         let rawSamples = rawBuffer.drain()
         vad.reset()
 
-        NSLog("[AudioEngine] Stopped. Raw samples: %d (%.1fs at %.0f Hz)",
-              rawSamples.count, Double(rawSamples.count) / hardwareSampleRate, hardwareSampleRate)
+        guard !rawSamples.isEmpty else {
+            NSLog("[AudioEngine] Stopped. No samples captured")
+            return []
+        }
 
-        guard !rawSamples.isEmpty else { return [] }
+        var rawRMS: Float = 0
+        var rawPeak: Float = 0
+        vDSP_rmsqv(rawSamples, 1, &rawRMS, vDSP_Length(rawSamples.count))
+        vDSP_maxmgv(rawSamples, 1, &rawPeak, vDSP_Length(rawSamples.count))
+        NSLog("[AudioEngine] Stopped. %d samples (%.1fs at %.0f Hz) RMS=%.5f Peak=%.5f",
+              rawSamples.count, Double(rawSamples.count) / hardwareSampleRate, hardwareSampleRate, rawRMS, rawPeak)
 
         let resampled = resample(rawSamples, from: hardwareSampleRate, to: 16000)
-        let normalized = normalize(resampled)
-        NSLog("[AudioEngine] Resampled to %d samples (%.1fs at 16kHz)", normalized.count, Double(normalized.count) / 16000.0)
-        return normalized
+        NSLog("[AudioEngine] Resampled to %d samples (%.1fs at 16kHz)", resampled.count, Double(resampled.count) / 16000.0)
+        return resampled
     }
 
     static func requestPermission() async -> Bool {
@@ -117,7 +128,7 @@ class AudioEngine {
     }
 
     func resamplePublic(_ input: [Float]) -> [Float] {
-        normalize(resample(input, from: hardwareSampleRate, to: 16000))
+        resample(input, from: hardwareSampleRate, to: 16000)
     }
 
     private func resample(_ input: [Float], from sourceSR: Double, to targetSR: Double) -> [Float] {
@@ -139,16 +150,7 @@ class AudioEngine {
         return output
     }
 
-    private func normalize(_ samples: [Float]) -> [Float] {
-        guard !samples.isEmpty else { return samples }
-        var peak: Float = 0
-        vDSP_maxmgv(samples, 1, &peak, vDSP_Length(samples.count))
-        guard peak > 0 else { return samples }
-        var scale = 1.0 / peak
-        var output = [Float](repeating: 0, count: samples.count)
-        vDSP_vsmul(samples, 1, &scale, &output, 1, vDSP_Length(samples.count))
-        return output
-    }
+
 }
 
 enum AudioEngineError: Error, LocalizedError {

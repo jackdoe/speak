@@ -59,6 +59,7 @@ class TranscriptionPipeline {
     func applyVADSettings() {
         let vad = audioEngine.voiceActivityDetector
         vad.isEnabled = settings.vadEnabled
+        vad.passthrough = settings.sileroVADEnabled
         vad.speechThreshold = settings.vadSpeechThreshold
         vad.silenceThreshold = settings.vadSilenceThreshold
         vad.minSpeechDurationMs = settings.vadMinSpeechMs

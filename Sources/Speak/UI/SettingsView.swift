@@ -394,6 +394,14 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("Mouse Zone") {
+                    Toggle("Enable mouse trigger zone", isOn: $settings.mouseZoneEnabled)
+                        .focusable(false)
+                    Text("Hover to record + send. Click and drag to reposition.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+
                 Section("System") {
                     Toggle("Launch at login", isOn: $settings.launchAtLogin)
                         .focusable(false)

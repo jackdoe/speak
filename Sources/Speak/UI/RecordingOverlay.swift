@@ -14,7 +14,8 @@ class RecordingOverlayState {
         isSpeaking = audioEngine.voiceActivityDetector.isSpeaking
         audioLevel = audioEngine.audioLevel
         speechDurationSec = Double(audioEngine.rawBuffer.count) / audioEngine.hardwareSampleRate
-        waveformSamples.append(min(1.0, audioLevel * 30))
+        let db = 20 * log10f(max(audioLevel, 1e-6))
+        waveformSamples.append(max(0, min(1, (db + 50) / 25)))
         if waveformSamples.count > 30 { waveformSamples.removeFirst(waveformSamples.count - 30) }
     }
 }
@@ -165,22 +166,8 @@ class RecordingOverlayController {
         guard let window = window,
               let screen = NSScreen.main else { return }
 
-        let screenFrame = screen.visibleFrame
         let size = window.contentView?.fittingSize ?? window.frame.size
-        let margin: CGFloat = 20
-
-        let origin: NSPoint
-        switch position {
-        case .topLeft:
-            origin = NSPoint(x: screenFrame.minX + margin, y: screenFrame.maxY - size.height - margin)
-        case .topRight:
-            origin = NSPoint(x: screenFrame.maxX - size.width - margin, y: screenFrame.maxY - size.height - margin)
-        case .bottomLeft:
-            origin = NSPoint(x: screenFrame.minX + margin, y: screenFrame.minY + margin)
-        case .bottomRight:
-            origin = NSPoint(x: screenFrame.maxX - size.width - margin, y: screenFrame.minY + margin)
-        }
-
+        let origin = position.origin(for: size, in: screen.visibleFrame)
         window.setFrame(NSRect(origin: origin, size: size), display: true)
     }
 }

@@ -75,6 +75,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.handleKeyUp(sendReturn: isSend)
         }
 
+        MouseZoneController.shared.onMouseEnter = { [weak self] in
+            self?.handleKeyDown(sendReturn: true)
+        }
+        MouseZoneController.shared.onMouseLeave = { [weak self] in
+            self?.handleKeyUp(sendReturn: true)
+        }
+        MouseZoneController.shared.onDragEnd = { [weak self] origin in
+            self?.pipeline.settings.mouseZoneX = origin.x
+            self?.pipeline.settings.mouseZoneY = origin.y
+            self?.pipeline.settings.save()
+        }
+
         statusBarController.onModelSelected = { [weak self] modelName in
             self?.selectModel(named: modelName)
         }
@@ -101,6 +113,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self = self else { return }
             self.pipeline.settings.transcriptionMode = enabled ? .continuous : .buffered
             self.pipeline.settings.save()
+        }
+        statusBarController.isMouseZoneEnabled = pipeline.settings.mouseZoneEnabled
+        statusBarController.onMouseZoneToggled = { [weak self] enabled in
+            guard let self = self else { return }
+            self.pipeline.settings.mouseZoneEnabled = enabled
+            self.pipeline.settings.save()
+            self.updateMouseZone()
         }
         statusBarController.onMicWarmToggled = { [weak self] enabled in
             guard let self = self else { return }
@@ -130,6 +149,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusBarController.isMicWarm = pipeline.settings.keepMicWarm
         statusBarController.isContinuousMode = pipeline.settings.transcriptionMode == .continuous
+        statusBarController.isMouseZoneEnabled = pipeline.settings.mouseZoneEnabled
         statusBarController.inputGain = pipeline.settings.inputGain
         pipeline.audioEngine.inputGain = pipeline.settings.inputGain
         if pipeline.settings.keepMicWarm {
@@ -158,6 +178,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        updateMouseZone()
         NSLog("[SpeakApp] Launch complete")
     }
 
@@ -192,6 +213,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let t0 = CFAbsoluteTimeGetCurrent()
         statusBarController.state = .transcribing
         RecordingOverlayController.shared.setTranscribing()
+        MouseZoneController.shared.setTranscribing()
 
         Task {
             let t1 = CFAbsoluteTimeGetCurrent()
@@ -206,6 +228,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 statusBarController.state = .idle
                 RecordingOverlayController.shared.hide()
+                MouseZoneController.shared.setIdle()
                 let t3 = CFAbsoluteTimeGetCurrent()
                 NSLog("[Timing] key up → stopAudio+transcribe: %.1fms, cleanup: %.1fms, total: %.1fms%@",
                       (t2-t1)*1000, (t3-t2)*1000, (t3-t0)*1000, sendReturn ? " [+Return]" : "")
@@ -246,6 +269,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.hotkeyManager.setKeyCodes(primary: newSettings.hotkeyKeyCode, send: newSettings.sendHotkeyKeyCode)
                 self?.statusBarController.isMicWarm = newSettings.keepMicWarm
                 self?.statusBarController.isContinuousMode = newSettings.transcriptionMode == .continuous
+                self?.updateMouseZone()
             },
             onModelDownloaded: { [weak self] in
                 guard let self = self else { return }
@@ -269,6 +293,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.openSettings(tab: 0)
             }
         )
+    }
+
+    private func updateMouseZone() {
+        statusBarController.isMouseZoneEnabled = pipeline.settings.mouseZoneEnabled
+        if pipeline.settings.mouseZoneEnabled {
+            let origin: NSPoint?
+            if let x = pipeline.settings.mouseZoneX, let y = pipeline.settings.mouseZoneY {
+                origin = NSPoint(x: x, y: y)
+            } else {
+                origin = nil
+            }
+            MouseZoneController.shared.show(savedOrigin: origin)
+        } else {
+            MouseZoneController.shared.hide()
+        }
     }
 
     private func selectModel(named name: String) {
