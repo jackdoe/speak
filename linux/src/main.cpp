@@ -1,3 +1,4 @@
+#include "claude.h"
 #include "keyboard.h"
 #include "microphone.h"
 #include "recognizer.h"
@@ -140,11 +141,6 @@ struct Job {
     Target target;
 };
 
-static void to_claude(const std::string& text) {
-    FILE* p = popen("speak-claude", "w");
-    if (!p || (fwrite(text.data(), 1, text.size(), p), pclose(p)) != 0) fprintf(stderr, "speak-claude failed\n");
-}
-
 static int run(const Options& o) {
     sigset_t mask;
     sigemptyset(&mask);
@@ -191,7 +187,13 @@ static int run(const Options& o) {
             snprintf(summary, sizeof(summary), "%.1fs audio, peak %.3f, in %.0f ms", double(samples.size()) / Microphone::rate, peak, ms_since(t));
             if (o.verbose) fprintf(stderr, "%s, %zu chars\n", summary, text.size());
             status.set_last(std::string(summary) + (text.empty() ? ", nothing heard" : ""));
-            if (job.target == Target::claude && !text.empty()) to_claude(text);
+            if (job.target == Target::claude && !text.empty()) {
+                try {
+                    claude::send(text);
+                } catch (const std::exception& e) {
+                    fprintf(stderr, "speak: %s\n", e.what());
+                }
+            }
             wayland.post([&, text, target = job.target] {
                 if (target != Target::claude && !text.empty())
                     keyboard.type(utf32(text + (target == Target::send ? "\n" : " ")));

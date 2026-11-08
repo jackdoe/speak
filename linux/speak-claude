@@ -1,9 +1,0 @@
-#!/bin/sh
-set -eu
-claude="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-session=$(tail -n 1 "$claude/history.jsonl" | jq -r .sessionId)
-pid=$(jq -r --arg s "$session" 'select(.sessionId == $s) | .pid' "$claude"/sessions/*.json)
-shell=$(ps -o ppid= -p "$pid" | tr -d ' ')
-kitty="unix:$XDG_RUNTIME_DIR/kitty-$(ps -o ppid= -p "$shell" | tr -d ' ')"
-kitty @ --to "$kitty" send-text --match "pid:$shell" --bracketed-paste=enable --stdin
-kitty @ --to "$kitty" send-text --match "pid:$shell" '\r'

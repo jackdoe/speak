@@ -118,7 +118,7 @@ bind = SHIFT, Page_Down, global, speak:send
 bind = , Page_Up, global, speak:claude
 ```
 
-`speak:talk` types the transcript; `speak:send` types it and presses Return. `speak:claude` sends it to the Claude Code session you last prompted, wherever focus is: `speak-claude` finds that session from `~/.claude/history.jsonl` and pastes into its kitty window, which needs `jq` and in `kitty.conf`:
+`speak:talk` types the transcript; `speak:send` types it and presses Return. `speak:claude` sends it to Claude Code wherever focus is: speak asks kitty over its remote control socket for the most recently focused tab running `claude`, pastes the transcript there and presses Return. This needs in `kitty.conf`:
 
 ```
 allow_remote_control socket-only

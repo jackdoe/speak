@@ -23,9 +23,12 @@ FetchContent_Declare(cublas
     URL https://files.pythonhosted.org/packages/7b/ea/9b6c36aef90766eebb4763aded157039e797ae9789c9c216e960d1d3cd47/nvidia_cublas_cu12-12.9.3.13-py3-none-manylinux_2_27_x86_64.whl
     URL_HASH SHA256=d7d51055f161b317c7105ddaae90e71eda059026074ffef93cf7cde2886bfe72
     DOWNLOAD_NAME cublas.zip)
+FetchContent_Declare(json
+    URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
+    URL_HASH SHA256=42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa)
 set(KALDI_NATIVE_FBANK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(KALDI_NATIVE_FBANK_BUILD_PYTHON OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(onnxruntime kaldi_native_fbank cudart cublas)
+FetchContent_MakeAvailable(onnxruntime kaldi_native_fbank cudart cublas json)
 
 set(ORT_LIB ${onnxruntime_SOURCE_DIR}/lib)
 set(CUDART_LIB ${cudart_SOURCE_DIR}/nvidia/cuda_runtime/lib)
@@ -69,6 +72,7 @@ add_executable(speak
     src/wayland.cpp
     src/status.cpp
     src/keyboard.cpp
+    src/claude.cpp
     ${PROTOCOL_SOURCES})
 
 target_include_directories(speak PRIVATE src ${PROTOCOL_DIR})
@@ -78,6 +82,7 @@ target_link_libraries(speak PRIVATE
     PkgConfig::DEPS
     Threads::Threads
     kaldi-native-fbank-core
+    nlohmann_json::nlohmann_json
     -Wl,--no-as-needed ${LINKED_LIBS} -Wl,--as-needed)
 
 set_target_properties(speak PROPERTIES
@@ -85,7 +90,6 @@ set_target_properties(speak PROPERTIES
     INSTALL_RPATH "$ORIGIN/../lib/speak")
 
 install(TARGETS speak RUNTIME DESTINATION bin COMPONENT speak)
-install(PROGRAMS speak-claude DESTINATION bin COMPONENT speak)
 foreach(lib ${LINKED_LIBS} ${LOADED_LIBS})
     get_filename_component(name ${lib} NAME)
     file(REAL_PATH ${lib} real)
