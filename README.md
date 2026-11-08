@@ -115,9 +115,17 @@ This builds `speak`, downloads the model to `~/.local/share/speak/parakeet-tdt-0
 exec-once = speak
 bind = , Page_Down, global, speak:talk
 bind = SHIFT, Page_Down, global, speak:send
+bind = , Page_Up, global, speak:claude
 ```
 
-`speak:talk` types the transcript; `speak:send` types it and presses Return. In waybar:
+`speak:talk` types the transcript; `speak:send` types it and presses Return. `speak:claude` sends it to the Claude Code session you last prompted, wherever focus is: `speak-claude` finds that session from `~/.claude/history.jsonl` and pastes into its kitty window, which needs `jq` and in `kitty.conf`:
+
+```
+allow_remote_control socket-only
+listen_on unix:${XDG_RUNTIME_DIR}/kitty
+```
+
+ In waybar:
 
 ```json
 "custom/speak": { "exec": "speak --waybar", "return-type": "json", "restart-interval": 1 }
@@ -127,6 +135,7 @@ bind = SHIFT, Page_Down, global, speak:send
 speak --devices              # list audio sources
 speak --device SOURCE        # use a specific source
 speak --cpu                  # run without CUDA
+speak --verbose              # log key presses and timings (never the text)
 speak recording.wav          # transcribe a 16 kHz wav, print timing
 ```
 

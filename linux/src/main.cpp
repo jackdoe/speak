@@ -30,6 +30,7 @@ struct Options {
     std::string file;
     bool devices = false;
     bool waybar = false;
+    bool verbose = false;
 };
 
 static std::string default_model() {
@@ -41,14 +42,16 @@ static std::string default_model() {
 static void usage() {
     fprintf(stderr,
             "speak — hold-to-talk dictation for Hyprland\n\n"
-            "  speak [--model DIR] [--device SOURCE] [--cpu]   run\n"
+            "  speak [--model DIR] [--device SOURCE] [--cpu] [--verbose]\n"
+            "                                                   run; --verbose logs key presses and timings\n"
             "  speak FILE.wav [--model DIR] [--cpu]            transcribe a file\n"
             "  speak --devices                                  list audio sources\n"
             "  speak --waybar                                   stream status for a waybar custom module\n\n"
             "hyprland.conf:\n"
             "  exec-once = speak\n"
             "  bind = , Page_Down, global, speak:talk\n"
-            "  bind = SHIFT, Page_Down, global, speak:send\n\n"
+            "  bind = SHIFT, Page_Down, global, speak:send\n"
+            "  bind = , Page_Up, global, speak:claude\n\n"
             "model: %s\n",
             default_model().c_str());
 }
@@ -63,6 +66,7 @@ static std::optional<Options> parse(int argc, char** argv) {
         else if (a == "--cpu") o.gpu = false;
         else if (a == "--devices") o.devices = true;
         else if (a == "--waybar") o.waybar = true;
+        else if (a == "--verbose") o.verbose = true;
         else if (!a.starts_with("-") && o.file.empty()) o.file = a;
         else return std::nullopt;
     }
@@ -129,10 +133,17 @@ static int transcribe_file(const Options& o) {
     return 0;
 }
 
+enum class Target { type, send, claude };
+
 struct Job {
     int64_t from, to;
-    bool enter;
+    Target target;
 };
+
+static void to_claude(const std::string& text) {
+    FILE* p = popen("speak-claude", "w");
+    if (!p || (fwrite(text.data(), 1, text.size(), p), pclose(p)) != 0) fprintf(stderr, "speak-claude failed\n");
+}
 
 static int run(const Options& o) {
     sigset_t mask;
@@ -154,7 +165,7 @@ static int run(const Options& o) {
     bool stopping = false;
 
     int64_t start = -1;
-    bool start_enter = false;
+    Target start_target = Target::type;
     int pending = 0;
 
     auto settle = [&] {
@@ -178,26 +189,28 @@ static int run(const Options& o) {
             for (float x : samples) peak = std::max(peak, std::abs(x));
             char summary[96];
             snprintf(summary, sizeof(summary), "%.1fs audio, peak %.3f, in %.0f ms", double(samples.size()) / Microphone::rate, peak, ms_since(t));
-            fprintf(stderr, "%s, %zu chars\n", summary, text.size());
+            if (o.verbose) fprintf(stderr, "%s, %zu chars\n", summary, text.size());
             status.set_last(std::string(summary) + (text.empty() ? ", nothing heard" : ""));
-            wayland.post([&, text, enter = job.enter] {
-                if (!text.empty()) keyboard.type(utf32(text + (enter ? "\n" : " ")));
+            if (job.target == Target::claude && !text.empty()) to_claude(text);
+            wayland.post([&, text, target = job.target] {
+                if (target != Target::claude && !text.empty())
+                    keyboard.type(utf32(text + (target == Target::send ? "\n" : " ")));
                 --pending;
                 settle();
             });
         }
     });
 
-    auto hold = [&](bool enter) {
-        return [&, enter](bool pressed) {
-            fprintf(stderr, "%s %s\n", enter ? "send" : "talk", pressed ? "pressed" : "released");
+    auto hold = [&](Target target, const char* name) {
+        return [&, target, name](bool pressed) {
+            if (o.verbose) fprintf(stderr, "%s %s\n", name, pressed ? "pressed" : "released");
             if (pressed && start < 0) {
                 start = std::max<int64_t>(0, mic.now() - preroll);
-                start_enter = enter;
-            } else if (!pressed && start >= 0 && start_enter == enter) {
+                start_target = target;
+            } else if (!pressed && start >= 0 && start_target == target) {
                 {
                     std::lock_guard lk(mu);
-                    jobs.push_back({start, mic.now() + tail, enter});
+                    jobs.push_back({start, mic.now() + tail, target});
                 }
                 cv.notify_one();
                 start = -1;
@@ -206,8 +219,9 @@ static int run(const Options& o) {
             settle();
         };
     };
-    wayland.shortcut("talk", "Hold to dictate", hold(false));
-    wayland.shortcut("send", "Hold to dictate, then press Enter", hold(true));
+    wayland.shortcut("talk", "Hold to dictate", hold(Target::type, "talk"));
+    wayland.shortcut("send", "Hold to dictate, then press Enter", hold(Target::send, "send"));
+    wayland.shortcut("claude", "Hold to dictate to the last used Claude Code session", hold(Target::claude, "claude"));
 
     struct Finally {
         std::function<void()> f;
@@ -222,7 +236,7 @@ static int run(const Options& o) {
         close(stop_fd);
     }};
 
-    fprintf(stderr, "ready\n");
+    if (o.verbose) fprintf(stderr, "ready\n");
     wayland.run(stop_fd);
     return 0;
 }

@@ -85,6 +85,7 @@ set_target_properties(speak PROPERTIES
     INSTALL_RPATH "$ORIGIN/../lib/speak")
 
 install(TARGETS speak RUNTIME DESTINATION bin COMPONENT speak)
+install(PROGRAMS speak-claude DESTINATION bin COMPONENT speak)
 foreach(lib ${LINKED_LIBS} ${LOADED_LIBS})
     get_filename_component(name ${lib} NAME)
     file(REAL_PATH ${lib} real)
