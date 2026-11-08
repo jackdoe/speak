@@ -1,374 +1,247 @@
-#include "transcription_pipeline.h"
-#include "hotkey_manager.h"
-#include "overlay.h"
-#include "control.h"
-#include "text_output.h"
-#include "model_downloader.h"
-#include "benchmark.h"
-#include <csignal>
-#include <cstring>
-#include <cstdlib>
-#include <thread>
+#include "keyboard.h"
+#include "microphone.h"
+#include "recognizer.h"
+#include "status.h"
+#include "wayland.h"
+
+#include <signal.h>
+#include <sys/signalfd.h>
+#include <unistd.h>
+
 #include <chrono>
-#include <sstream>
-#include <filesystem>
+#include <cmath>
+#include <condition_variable>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <deque>
+#include <fstream>
+#include <mutex>
+#include <optional>
+#include <thread>
 
-namespace fs = std::filesystem;
+static constexpr int64_t preroll = Microphone::rate / 4;
+static constexpr int64_t tail = Microphone::rate * 3 / 20;
 
-static std::atomic<bool> g_running{true};
+struct Options {
+    std::string model;
+    std::string device;
+    bool gpu = true;
+    std::string file;
+    bool devices = false;
+    bool waybar = false;
+};
 
-static void signal_handler(int) {
-    g_running = false;
+static std::string default_model() {
+    const char* data = std::getenv("XDG_DATA_HOME");
+    std::string base = data && *data ? data : std::string(std::getenv("HOME")) + "/.local/share";
+    return base + "/speak/parakeet-tdt-0.6b-v2";
 }
 
-static std::string handle_command(TranscriptionPipeline& pipeline, Overlay& overlay, const std::string& cmd) {
-    if (cmd == "status") {
-        std::ostringstream ss;
-        ss << (pipeline.is_recording() ? "recording" : pipeline.is_transcribing() ? "transcribing" : "idle");
-        auto* m = pipeline.model_manager().current();
-        if (m) ss << "\nmodel: " << m->name();
-        ss << "\nmode: " << (pipeline.settings().transcription_mode == TranscriptionMode::continuous ? "continuous" : "buffered");
-        ss << "\ntotal: " << pipeline.perf().total();
-        if (pipeline.perf().total() > 0)
-            ss << "\navg_rtf: " << pipeline.perf().average_rtf();
-        return ss.str();
-    }
-
-    if (cmd == "stop" || cmd == "quit") {
-        g_running = false;
-        return "ok";
-    }
-
-    if (cmd == "models") {
-        std::ostringstream ss;
-        auto* cur = pipeline.model_manager().current();
-        for (auto& m : pipeline.model_manager().available()) {
-            if (cur && cur->id == m.id) ss << "* ";
-            else ss << "  ";
-            ss << m.name() << " (" << (m.size / 1000000) << " MB)\n";
-        }
-        return ss.str();
-    }
-
-    if (cmd.size() > 6 && cmd.substr(0, 6) == "model ") {
-        std::string name = cmd.substr(6);
-        for (auto& m : pipeline.model_manager().available()) {
-            if (m.name() == name || m.id == name) {
-                try {
-                    pipeline.load_model(m);
-                    return "ok: loaded " + m.name();
-                } catch (const std::exception& e) {
-                    return std::string("error: ") + e.what();
-                }
-            }
-        }
-        return "error: model not found";
-    }
-
-    if (cmd == "continuous on") {
-        pipeline.settings().transcription_mode = TranscriptionMode::continuous;
-        pipeline.settings().save();
-        return "ok";
-    }
-    if (cmd == "continuous off") {
-        pipeline.settings().transcription_mode = TranscriptionMode::buffered;
-        pipeline.settings().save();
-        return "ok";
-    }
-
-    if (cmd == "mic-warm on") {
-        pipeline.settings().keep_mic_warm = true;
-        pipeline.settings().save();
-        pipeline.audio_engine().prepare();
-        return "ok";
-    }
-    if (cmd == "mic-warm off") {
-        pipeline.settings().keep_mic_warm = false;
-        pipeline.settings().save();
-        pipeline.audio_engine().release();
-        return "ok";
-    }
-
-    if (cmd == "reload") {
-        pipeline.model_manager().scan();
-        return "ok: " + std::to_string(pipeline.model_manager().available().size()) + " models";
-    }
-
-    return "error: unknown command\ncommands: status, stop, models, model <name>, continuous on|off, mic-warm on|off, reload";
-}
-
-static void print_usage() {
+static void usage() {
     fprintf(stderr,
-        "speak — push-to-talk transcription\n"
-        "\n"
-        "run:\n"
-        "  speak -model <path>          model file (.bin)\n"
-        "  speak -continuous             continuous transcription mode\n"
-        "  speak -warm                   keep mic open between recordings\n"
-        "  speak -type                   output via simulated typing (default: paste)\n"
-        "  speak -no-vad                 disable voice activity detection\n"
-        "  speak -device <name>          PulseAudio source (see: speak --devices)\n"
-        "  speak -gpu / -no-gpu          force GPU on/off\n"
-        "  speak -threads <n>            inference threads\n"
-        "  speak -lang <code>            language code (default: en)\n"
-        "\n"
-        "models:\n"
-        "  speak --remote-models         list downloadable models\n"
-        "  speak --download <name>       download model to %s\n"
-        "\n"
-        "daemon control:\n"
-        "  speak status                  query running instance\n"
-        "  speak stop                    stop running instance\n"
-        "  speak models                  list local models\n"
-        "  speak model <name>            switch model\n"
-        "  speak continuous on|off       toggle mode\n"
-        "\n"
-        "benchmark:\n"
-        "  speak --benchmark <model>     run benchmark\n",
-        ModelManager::models_directory().c_str()
-    );
+            "speak — hold-to-talk dictation for Hyprland\n\n"
+            "  speak [--model DIR] [--device SOURCE] [--cpu]   run\n"
+            "  speak FILE.wav [--model DIR] [--cpu]            transcribe a file\n"
+            "  speak --devices                                  list audio sources\n"
+            "  speak --waybar                                   stream status for a waybar custom module\n\n"
+            "hyprland.conf:\n"
+            "  exec-once = speak\n"
+            "  bind = , Page_Down, global, speak:talk\n"
+            "  bind = SHIFT, Page_Down, global, speak:send\n\n"
+            "model: %s\n",
+            default_model().c_str());
 }
 
-static int cmd_remote_models() {
-    auto models = ModelDownloader::fallback_models();
-    std::string dir = ModelManager::models_directory();
-
-    for (auto& m : models) {
-        bool local = fs::exists(dir + "/" + m.filename);
-        printf("  %s %-36s %4lld MB  %s\n",
-               local ? "*" : " ",
-               m.filename.c_str(),
-               static_cast<long long>(m.size / 1000000),
-               m.url.c_str());
+static std::optional<Options> parse(int argc, char** argv) {
+    Options o;
+    o.model = default_model();
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        if (a == "--model" && i + 1 < argc) o.model = argv[++i];
+        else if (a == "--device" && i + 1 < argc) o.device = argv[++i];
+        else if (a == "--cpu") o.gpu = false;
+        else if (a == "--devices") o.devices = true;
+        else if (a == "--waybar") o.waybar = true;
+        else if (!a.starts_with("-") && o.file.empty()) o.file = a;
+        else return std::nullopt;
     }
+    return o;
+}
+
+static std::u32string utf32(const std::string& s) {
+    std::u32string out;
+    for (size_t i = 0; i < s.size();) {
+        unsigned char c = s[i];
+        int n = c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
+        char32_t cp = n == 1 ? c : c & (0x7F >> n);
+        for (int k = 1; k < n && i + k < s.size(); ++k) cp = (cp << 6) | (s[i + k] & 0x3F);
+        out.push_back(cp);
+        i += n;
+    }
+    return out;
+}
+
+static double ms_since(std::chrono::steady_clock::time_point t) {
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t).count();
+}
+
+static std::vector<float> read_wav(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    char riff[12];
+    if (!in.read(riff, 12) || std::string(riff, 4) != "RIFF" || std::string(riff + 8, 4) != "WAVE")
+        throw std::runtime_error(path + ": not a wav file");
+    uint16_t format = 0, channels = 0, bits = 0;
+    uint32_t rate = 0;
+    for (;;) {
+        char id[4];
+        uint32_t size;
+        if (!in.read(id, 4) || !in.read(reinterpret_cast<char*>(&size), 4)) throw std::runtime_error(path + ": no data");
+        std::string chunk(id, 4);
+        if (chunk == "fmt ") {
+            std::vector<char> fmt(size);
+            in.read(fmt.data(), size);
+            std::memcpy(&format, fmt.data(), 2);
+            std::memcpy(&channels, fmt.data() + 2, 2);
+            std::memcpy(&rate, fmt.data() + 4, 4);
+            std::memcpy(&bits, fmt.data() + 14, 2);
+        } else if (chunk == "data") {
+            if (format != 1 || channels != 1 || bits != 16 || rate != Microphone::rate)
+                throw std::runtime_error(path + ": need 16-bit mono PCM at 16 kHz");
+            std::vector<int16_t> pcm(size / 2);
+            in.read(reinterpret_cast<char*>(pcm.data()), std::streamsize(pcm.size() * 2));
+            std::vector<float> samples(pcm.size());
+            for (size_t i = 0; i < pcm.size(); ++i) samples[i] = pcm[i] / 32768.0f;
+            return samples;
+        } else {
+            in.seekg(size + (size & 1), std::ios::cur);
+        }
+    }
+}
+
+static int transcribe_file(const Options& o) {
+    std::vector<float> samples = read_wav(o.file);
+    Recognizer recognizer(o.model, o.gpu);
+    auto t = std::chrono::steady_clock::now();
+    std::string text = recognizer.transcribe(samples);
+    fprintf(stderr, "%.1fs audio in %.0f ms\n", double(samples.size()) / Microphone::rate, ms_since(t));
+    printf("%s\n", text.c_str());
     return 0;
 }
 
-static int cmd_download(const char* name) {
-    auto models = ModelDownloader::fallback_models();
-    std::string target = name;
+struct Job {
+    int64_t from, to;
+    bool enter;
+};
 
-    if (target.find(".bin") == std::string::npos) target += ".bin";
-    if (target.find("ggml-") != 0) target = "ggml-" + target;
+static int run(const Options& o) {
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGTERM);
+    pthread_sigmask(SIG_BLOCK, &mask, nullptr);
+    int stop_fd = signalfd(-1, &mask, SFD_CLOEXEC);
 
-    const RemoteModel* found = nullptr;
-    for (auto& m : models) {
-        if (m.filename == target) { found = &m; break; }
-    }
+    Wayland wayland;
+    Status status;
+    Keyboard keyboard(wayland);
+    Microphone mic(o.device);
+    Recognizer recognizer(o.model, o.gpu);
 
-    if (!found) {
-        fprintf(stderr, "Unknown model: %s\nAvailable:\n", name);
-        for (auto& m : models) fprintf(stderr, "  %s\n", m.filename.c_str());
-        return 1;
-    }
+    std::mutex mu;
+    std::condition_variable cv;
+    std::deque<Job> jobs;
+    bool stopping = false;
 
-    std::string dest = ModelManager::models_directory() + "/" + found->filename;
-    if (fs::exists(dest)) {
-        printf("Already downloaded: %s\n", dest.c_str());
-        return 0;
-    }
+    int64_t start = -1;
+    bool start_enter = false;
+    int pending = 0;
 
-    printf("Downloading %s (%lld MB)...\n", found->filename.c_str(),
-           static_cast<long long>(found->size / 1000000));
+    auto settle = [&] {
+        status.set(start >= 0 ? Status::recording : pending ? Status::transcribing : Status::idle);
+    };
 
-    int last_pct = -1;
-    bool ok = ModelDownloader::download(found->url, dest, [&](double frac) {
-        int pct = static_cast<int>(frac * 100);
-        if (pct != last_pct) {
-            last_pct = pct;
-            printf("\r  %3d%%", pct);
-            fflush(stdout);
+    std::thread worker([&] {
+        for (;;) {
+            Job job;
+            {
+                std::unique_lock lk(mu);
+                cv.wait(lk, [&] { return stopping || !jobs.empty(); });
+                if (stopping) return;
+                job = jobs.front();
+                jobs.pop_front();
+            }
+            auto samples = mic.slice(job.from, job.to);
+            auto t = std::chrono::steady_clock::now();
+            std::string text = recognizer.transcribe(samples);
+            float peak = 0;
+            for (float x : samples) peak = std::max(peak, std::abs(x));
+            char summary[96];
+            snprintf(summary, sizeof(summary), "%.1fs audio, peak %.3f, in %.0f ms", double(samples.size()) / Microphone::rate, peak, ms_since(t));
+            fprintf(stderr, "%s, %zu chars\n", summary, text.size());
+            status.set_last(std::string(summary) + (text.empty() ? ", nothing heard" : ""));
+            wayland.post([&, text, enter = job.enter] {
+                if (!text.empty()) keyboard.type(utf32(text + (enter ? "\n" : " ")));
+                --pending;
+                settle();
+            });
         }
     });
 
-    if (ok) {
-        printf("\r  done: %s\n", dest.c_str());
+    auto hold = [&](bool enter) {
+        return [&, enter](bool pressed) {
+            fprintf(stderr, "%s %s\n", enter ? "send" : "talk", pressed ? "pressed" : "released");
+            if (pressed && start < 0) {
+                start = std::max<int64_t>(0, mic.now() - preroll);
+                start_enter = enter;
+            } else if (!pressed && start >= 0 && start_enter == enter) {
+                {
+                    std::lock_guard lk(mu);
+                    jobs.push_back({start, mic.now() + tail, enter});
+                }
+                cv.notify_one();
+                start = -1;
+                ++pending;
+            }
+            settle();
+        };
+    };
+    wayland.shortcut("talk", "Hold to dictate", hold(false));
+    wayland.shortcut("send", "Hold to dictate, then press Enter", hold(true));
+
+    struct Finally {
+        std::function<void()> f;
+        ~Finally() { f(); }
+    } finally{[&] {
+        {
+            std::lock_guard lk(mu);
+            stopping = true;
+        }
+        cv.notify_one();
+        worker.join();
+        close(stop_fd);
+    }};
+
+    fprintf(stderr, "ready\n");
+    wayland.run(stop_fd);
+    return 0;
+}
+
+int main(int argc, char** argv) {
+    auto o = parse(argc, argv);
+    if (!o) {
+        usage();
+        return 2;
+    }
+    if (o->devices) {
+        Microphone::list_devices();
         return 0;
-    } else {
-        printf("\r  failed\n");
+    }
+    try {
+        if (o->waybar) Status::follow();
+        return o->file.empty() ? run(*o) : transcribe_file(*o);
+    } catch (const std::exception& e) {
+        fprintf(stderr, "speak: %s\n", e.what());
         return 1;
     }
-}
-
-static void run_daemon(TranscriptionPipeline& pipeline, const std::string& model_path) {
-    HotkeyManager hotkey;
-    Overlay overlay;
-    ControlServer control;
-
-    pipeline.on_transcription_start = [&]() {
-        overlay.set_state(Overlay::State::transcribing);
-    };
-    pipeline.on_transcription_end = [&]() {
-        overlay.set_state(Overlay::State::hidden);
-    };
-
-    control.on_command = [&](const std::string& cmd) {
-        return handle_command(pipeline, overlay, cmd);
-    };
-    control.start();
-
-    pipeline.apply_vad_settings();
-
-    hotkey.set_keysyms(pipeline.settings().hotkey_keysym, pipeline.settings().send_hotkey_keysym);
-
-    hotkey.on_key_down = [&](bool) {
-        pipeline.start_recording();
-        overlay.set_state(Overlay::State::recording);
-    };
-
-    hotkey.on_key_up = [&](bool is_send) {
-        int delay_ms = pipeline.settings().release_delay_ms;
-        std::thread([&pipeline, &overlay, is_send, delay_ms]() {
-            std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
-            overlay.set_state(Overlay::State::transcribing);
-
-            pipeline.stop_recording_and_transcribe();
-
-            if (is_send && pipeline.did_output_text()) {
-                int rd = pipeline.settings().send_return_delay_ms;
-                std::this_thread::sleep_for(std::chrono::milliseconds(rd));
-                TextOutput::press_return();
-            }
-
-            overlay.set_state(Overlay::State::hidden);
-        }).detach();
-    };
-
-    if (!hotkey.start()) {
-        fprintf(stderr, "[main] Hotkey manager failed — is X11 running?\n");
-        return;
-    }
-
-    if (pipeline.settings().keep_mic_warm) {
-        pipeline.audio_engine().prepare();
-    }
-
-    if (!model_path.empty()) {
-        if (!fs::exists(model_path)) {
-            fprintf(stderr, "[main] Model not found: %s\n", model_path.c_str());
-            fprintf(stderr, "[main] Download one with: speak --download tiny.en\n");
-            hotkey.stop();
-            control.stop();
-            return;
-        }
-        WhisperModel m;
-        m.id = fs::path(model_path).stem().string();
-        m.path = model_path;
-        m.size = static_cast<int64_t>(fs::file_size(model_path));
-        try {
-            pipeline.load_model(m);
-        } catch (const std::exception& e) {
-            fprintf(stderr, "[main] Failed to load model: %s\n", e.what());
-            hotkey.stop();
-            control.stop();
-            return;
-        }
-    } else {
-        pipeline.model_manager().scan();
-        if (!pipeline.model_manager().available().empty()) {
-            try {
-                pipeline.load_first_available();
-                fprintf(stderr, "[main] Auto-loaded model\n");
-            } catch (const std::exception& e) {
-                fprintf(stderr, "[main] No model auto-loaded: %s\n", e.what());
-            }
-        } else {
-            fprintf(stderr, "[main] No models found in %s\n", ModelManager::models_directory().c_str());
-            fprintf(stderr, "[main] Download one with: speak --download tiny.en\n");
-            hotkey.stop();
-            control.stop();
-            return;
-        }
-    }
-
-    fprintf(stderr, "[main] Ready — F12 hold-to-talk, F11 hold-to-talk+return, Ctrl+C to quit\n");
-
-    while (g_running) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    hotkey.stop();
-    control.stop();
-    pipeline.shutdown();
-    fprintf(stderr, "[main] Shutdown complete\n");
-}
-
-int main(int argc, char* argv[]) {
-    if (argc >= 3 && std::strcmp(argv[1], "--benchmark") == 0) {
-        run_benchmark(argv[2]);
-        return 0;
-    }
-
-    if (argc >= 2 && std::strcmp(argv[1], "--remote-models") == 0) {
-        return cmd_remote_models();
-    }
-
-    if (argc >= 2 && (std::strcmp(argv[1], "--devices") == 0 || std::strcmp(argv[1], "-devices") == 0)) {
-        AudioEngine::list_devices();
-        return 0;
-    }
-
-    if (argc >= 3 && std::strcmp(argv[1], "--download") == 0) {
-        return cmd_download(argv[2]);
-    }
-
-    if (argc >= 2 && (std::strcmp(argv[1], "--help") == 0 || std::strcmp(argv[1], "-h") == 0)) {
-        print_usage();
-        return 0;
-    }
-
-    bool has_flags = false;
-    for (int i = 1; i < argc; ++i) {
-        if (argv[i][0] == '-') { has_flags = true; break; }
-    }
-
-    if (argc >= 2 && !has_flags) {
-        std::string cmd;
-        for (int i = 1; i < argc; ++i) {
-            if (i > 1) cmd += ' ';
-            cmd += argv[i];
-        }
-        auto response = ControlServer::send_command(cmd);
-        printf("%s\n", response.c_str());
-        return response.substr(0, 5) == "error" ? 1 : 0;
-    }
-
-    std::signal(SIGINT, signal_handler);
-    std::signal(SIGTERM, signal_handler);
-
-    std::string model_path;
-    TranscriptionPipeline pipeline;
-
-    for (int i = 1; i < argc; ++i) {
-        if ((std::strcmp(argv[i], "-model") == 0 || std::strcmp(argv[i], "--model") == 0) && i + 1 < argc) {
-            model_path = argv[++i];
-        } else if (std::strcmp(argv[i], "-continuous") == 0 || std::strcmp(argv[i], "--continuous") == 0) {
-            pipeline.settings().transcription_mode = TranscriptionMode::continuous;
-        } else if (std::strcmp(argv[i], "-buffered") == 0 || std::strcmp(argv[i], "--buffered") == 0) {
-            pipeline.settings().transcription_mode = TranscriptionMode::buffered;
-        } else if (std::strcmp(argv[i], "-warm") == 0 || std::strcmp(argv[i], "--warm") == 0) {
-            pipeline.settings().keep_mic_warm = true;
-        } else if (std::strcmp(argv[i], "-no-warm") == 0 || std::strcmp(argv[i], "--no-warm") == 0) {
-            pipeline.settings().keep_mic_warm = false;
-        } else if (std::strcmp(argv[i], "-type") == 0 || std::strcmp(argv[i], "--type") == 0) {
-            pipeline.settings().output_mode = OutputMode::type;
-        } else if (std::strcmp(argv[i], "-paste") == 0 || std::strcmp(argv[i], "--paste") == 0) {
-            pipeline.settings().output_mode = OutputMode::paste;
-        } else if (std::strcmp(argv[i], "-gpu") == 0 || std::strcmp(argv[i], "--gpu") == 0) {
-            pipeline.settings().use_gpu = true;
-        } else if (std::strcmp(argv[i], "-no-gpu") == 0 || std::strcmp(argv[i], "--no-gpu") == 0) {
-            pipeline.settings().use_gpu = false;
-        } else if ((std::strcmp(argv[i], "-threads") == 0 || std::strcmp(argv[i], "--threads") == 0) && i + 1 < argc) {
-            pipeline.settings().thread_count = std::atoi(argv[++i]);
-        } else if ((std::strcmp(argv[i], "-lang") == 0 || std::strcmp(argv[i], "--lang") == 0) && i + 1 < argc) {
-            pipeline.settings().language = argv[++i];
-        } else if (std::strcmp(argv[i], "-no-vad") == 0 || std::strcmp(argv[i], "--no-vad") == 0) {
-            pipeline.settings().vad_enabled = false;
-        } else if ((std::strcmp(argv[i], "-device") == 0 || std::strcmp(argv[i], "--device") == 0) && i + 1 < argc) {
-            pipeline.audio_engine().device = argv[++i];
-        }
-    }
-
-    run_daemon(pipeline, model_path);
-    return 0;
 }

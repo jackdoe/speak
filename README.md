@@ -1,6 +1,6 @@
 # Speak
 
-Push-to-talk transcription for macOS. Hold a key, speak, release — your words appear wherever your cursor is.
+Push-to-talk transcription for macOS and Linux (Hyprland). Hold a key, speak, release — your words appear wherever your cursor is.
 
 Uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp) with Metal GPU acceleration on Apple Silicon.
 
@@ -93,6 +93,42 @@ Models are stored in `~/Library/Application Support/Speak/models/`. Download via
 | large-v3-turbo-q5 | 547 MB | ~0.5s |
 | medium.en | 1.5 GB | ~2.5s |
 | large-v3 | 2.9 GB | ~5s |
+
+## Linux (Hyprland)
+
+A native Wayland daemon running NVIDIA [Parakeet TDT 0.6B v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) on CUDA through ONNX Runtime. 30–110 ms from key release to text on an RTX 3080 for dictations up to 20 s, with punctuation and capitalisation. Audio is padded to a fixed 20 s shape with the true length passed to the encoder, so the GPU never re-plans its kernels and the padding is masked out of the result.
+
+- **Hotkeys** — Hyprland global shortcuts (`hyprland-global-shortcuts-v1`), real press and release events
+- **Typing** — virtual keyboard protocol (`zwp_virtual_keyboard_v1`), any Unicode, no `wtype`/`ydotool`
+- **Status** — `speak --waybar` streams state to a waybar custom module: red while recording, amber while transcribing
+- **Microphone** — always open at 16 kHz; the 250 ms before the key press is kept, so the first syllable is never lost
+
+Requirements: Hyprland, NVIDIA driver with CUDA 12 support, cuDNN 9, PipeWire/PulseAudio, `libwayland-client`, `libxkbcommon`, `libpulse`. The build fetches ONNX Runtime, kaldi-native-fbank and the CUDA 12.9 runtime.
+
+```bash
+make linux-install
+```
+
+This builds `speak`, downloads the model to `~/.local/share/speak/parakeet-tdt-0.6b-v2`, and installs to `~/.local/bin` and `~/.local/lib/speak`. Then in `hyprland.conf`:
+
+```
+exec-once = speak
+bind = , Page_Down, global, speak:talk
+bind = SHIFT, Page_Down, global, speak:send
+```
+
+`speak:talk` types the transcript; `speak:send` types it and presses Return. In waybar:
+
+```json
+"custom/speak": { "exec": "speak --waybar", "return-type": "json", "restart-interval": 1 }
+```
+
+```bash
+speak --devices              # list audio sources
+speak --device SOURCE        # use a specific source
+speak --cpu                  # run without CUDA
+speak recording.wav          # transcribe a 16 kHz wav, print timing
+```
 
 ## Built by
 

@@ -1,4 +1,4 @@
-.PHONY: whisper build run clean app install uninstall benchmark resolve linux linux-install linux-clean
+.PHONY: whisper build run clean app install uninstall benchmark resolve linux linux-model linux-install linux-clean
 
 APP_NAME = Speak
 BIN_DIR = $(shell swift build -c release --show-bin-path 2>/dev/null || echo .build/arm64-apple-macosx/release)
@@ -99,20 +99,25 @@ models-large-turbo-q5:
 	@curl -L --progress-bar -o Resources/models/ggml-large-v3-turbo-q5_0.bin "$(HF_BASE)/ggml-large-v3-turbo-q5_0.bin"
 
 LINUX_BUILD = linux/build
+LINUX_MODEL = $(or $(XDG_DATA_HOME),$(HOME)/.local/share)/speak/parakeet-tdt-0.6b-v2
+LINUX_MODEL_URL = https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-fp16.tar.bz2
+LINUX_MODEL_SHA256 = 37f67a1a6c942dae27d345ee395fbd19e25ee48996faf70fca25779026054cf0
 
 linux:
-	@mkdir -p $(LINUX_BUILD)
-	cd $(LINUX_BUILD) && cmake .. && make -j$$(nproc)
-	@echo ""
-	@echo "Built: $(LINUX_BUILD)/speak"
+	cmake -S linux -B $(LINUX_BUILD)
+	cmake --build $(LINUX_BUILD) -j$$(nproc)
 
-linux-install: linux
-	@mkdir -p $(HOME)/.local/bin
-	@cp $(LINUX_BUILD)/speak $(HOME)/.local/bin/speak
-	@mkdir -p $(HOME)/.config/autostart
-	@cp linux/speak.desktop $(HOME)/.config/autostart/speak.desktop
-	@mkdir -p $(HOME)/.local/share/speak/models
-	@echo "Installed speak to ~/.local/bin/speak"
+linux-model: $(LINUX_MODEL)/tokens.txt
+
+$(LINUX_MODEL)/tokens.txt:
+	@mkdir -p $(LINUX_MODEL)
+	curl -L --progress-bar -o $(LINUX_MODEL).tar.bz2 $(LINUX_MODEL_URL)
+	echo "$(LINUX_MODEL_SHA256)  $(LINUX_MODEL).tar.bz2" | sha256sum -c
+	tar xjf $(LINUX_MODEL).tar.bz2 -C $(LINUX_MODEL) --strip-components=1 --exclude=test_wavs
+	rm $(LINUX_MODEL).tar.bz2
+
+linux-install: linux linux-model
+	cmake --install $(LINUX_BUILD) --prefix $(HOME)/.local --component speak
 
 linux-clean:
 	rm -rf $(LINUX_BUILD)
