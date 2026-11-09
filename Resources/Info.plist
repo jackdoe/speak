@@ -9,9 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.speak.app</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>2.0.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
@@ -25,7 +25,7 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Speak needs microphone access for speech-to-text transcription.</string>
+    <string>Speak listens while you hold the dictation key and transcribes on this Mac.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright 2026. All rights reserved.</string>
     <key>NSPrincipalClass</key>

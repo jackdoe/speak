@@ -4,6 +4,4 @@
 xcuserdata/
 DerivedData/
 .DS_Store
-Resources/models/*.bin
-whisper.cpp/build/
 linux/build/

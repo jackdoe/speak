@@ -1,98 +1,65 @@
 # Speak
 
-Push-to-talk transcription for macOS and Linux (Hyprland). Hold a key, speak, release — your words appear wherever your cursor is.
+Push-to-talk transcription for macOS and Linux (Hyprland). Hold a key, speak, release — your words appear wherever your cursor is, with punctuation and capitalisation, fully on-device.
 
-Uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp) with Metal GPU acceleration on Apple Silicon.
+Both platforms run NVIDIA [Parakeet TDT 0.6B v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2).
 
-## Features
+## macOS
 
-- **Push-to-talk** — F12 to transcribe, F11 to transcribe + send (hits Return)
-- **Menu bar app** — lives in the status bar, no dock icon
-- **Metal accelerated** — runs whisper.cpp on the GPU
-- **Voice activity detection** — filters silence, supports 10+ minute recordings with pauses
-- **Recording overlay** — floating indicator with VAD state, duration, and audio level
-- **Model management** — download models from HuggingFace directly in the app
-- **Configurable** — hotkeys, output mode (type/paste), VAD thresholds, all whisper.cpp parameters
-- **Instant start** — optional always-on microphone for zero-latency recording
+A menu bar app running Parakeet TDT on Core ML (Apple Neural Engine), with its own TDT decoder — no third-party Swift packages. About 60 ms from key release to text for a one-word dictation on an M1 Max, 85 ms for 6 s of speech, 340 ms for 26 s.
 
-## Requirements
+- **Hotkeys** — hold **F12** to dictate and type the text followed by a space; **Shift+F12** types it and presses Return; **F11** sends it to Claude Code in kitty (below). Carbon hot keys, real press and release, no Accessibility permission needed for them. On a laptop keyboard hold fn, or turn on *Use F1, F2, etc. keys as standard function keys*; F11 is *Show Desktop* by default, switch that off in Keyboard Shortcuts › Mission Control.
+- **Microphone** — always open (so the orange microphone dot stays on) at 16 kHz into a 10-minute ring buffer; the 250 ms before the key press and 150 ms after the release are kept, so the first syllable is never lost.
+- **Typing** — Unicode keyboard events, any language or symbol; needs Accessibility permission, which Speak asks for at launch.
+- **Menu bar** — grey when idle, red while recording, amber while transcribing; the menu shows the last timing (never the text), Settings… and Quit.
+- **Settings** — microphone (default: the system default) and Launch at login.
+- **Privacy** — the transcript only ever goes to the app you are typing in. Nothing is logged unless you run with `--verbose`, and then only key presses, durations, peak level and character counts.
 
-- macOS 14+
-- Apple Silicon (M1/M2/M3/M4)
-- Xcode Command Line Tools
-- CMake (`brew install cmake`)
-
-## Build
-
-```bash
-git clone --recursive https://github.com/user/speak.git
-cd speak
-make app
-```
-
-This builds whisper.cpp with Metal, compiles the Swift app, and creates `Speak.app`.
-
-To install to `/Applications`:
+Requirements: macOS 14+, Apple Silicon, Xcode command line tools, `jq` (built into macOS 15+, `brew install jq` on 14).
 
 ```bash
 make install
 ```
 
-## First Launch
+This builds and signs `Speak.app`, downloads the model and installs the app to `/Applications`. Open it, allow the microphone and Accessibility, and turn on Launch at login in Settings. `make install` signs ad hoc by default, so macOS forgets the Accessibility grant on every rebuild; sign with your own identity to keep it: `make install SIGN_ID="Apple Development: …"`.
 
-The app guides you through setup:
+### The model
 
-1. **Microphone permission** — for audio capture
-2. **Accessibility permission** — for global hotkeys and text output
-3. **Model download** — pick a whisper model (Large V3 Turbo Q5 recommended)
-4. **Preferences** — configure hotkeys and behavior
+`make model` downloads the Core ML conversion [`FluidInference/parakeet-tdt-0.6b-v2-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml) at a pinned revision into `~/Library/Application Support/Speak/parakeet-tdt-0.6b-v2-coreml` (450 MB), checking every file against the SHA-256 or git hash Hugging Face publishes for it. Four bundles make the pipeline:
 
-## Usage
+| Bundle | Input → output | Runs on |
+|---|---|---|
+| `Preprocessor` | 16 kHz audio + length → 128 log-mel features, normalised per feature | any (`.all`) |
+| `Encoder` | mel `[1, 128, 1501]` + length → `[1, 1024, 188]` (FastConformer, 6-bit palettised) | Neural Engine |
+| `Decoder` | previous token + LSTM state → prediction | CPU |
+| `JointDecision` | encoder frame + prediction → token and duration | CPU |
 
-- **F12** (hold) — record speech, (release) — transcribe and output text
-- **F11** (hold) — same as F12 but also presses Return after (for chat apps)
-- **Menu bar icon** — switch models, toggle mic warm, open settings
+The encoder takes exactly 15 s. Every dictation is padded to that window and its true length passed in, so the model masks the padding out and Core ML never sees a new shape. Greedy TDT decoding is the same loop as on Linux. Longer dictations are split into 15 s windows that overlap by 2 s on each side of a cut; the cut goes between two words in the middle of a sentence, taken from the first window's own output, so neither window has to decide a sentence boundary on its own.
 
-## Make Targets
+### Claude Code in kitty
+
+F11 finds the most recently focused kitty tab running `claude` — wherever your focus is — pastes the transcript there and presses Return, over kitty's remote control socket. Add to `~/.config/kitty/kitty.conf`:
+
+```
+allow_remote_control socket-only
+listen_on unix:${HOME}/Library/Caches/kitty-speak/kitty
+```
+
+Create the directory once with `mkdir -m 700 ~/Library/Caches/kitty-speak` (Speak also creates it at launch), then quit kitty completely and start it again.
+
+```bash
+/Applications/Speak.app/Contents/MacOS/Speak --verbose      # log key presses and timings, never text
+/Applications/Speak.app/Contents/MacOS/Speak recording.wav  # transcribe any audio file, print timing
+```
 
 | Command | Description |
-|---------|-------------|
-| `make whisper` | Build whisper.cpp with Metal |
-| `make build` | Build whisper.cpp + release binary |
-| `make debug` | Build debug binary |
-| `make run` | Build debug + run |
-| `make app` | Create Speak.app bundle |
-| `make install` | Copy Speak.app to /Applications |
-| `make uninstall` | Remove from /Applications |
+|---|---|
+| `make build` | Release binary |
+| `make app` | Signed `Speak.app` in `.build/` |
+| `make model` | Download and verify the model |
+| `make install` | `app` + `model`, copy to `/Applications` |
+| `make uninstall` | Remove from `/Applications` |
 | `make clean` | Remove build artifacts |
-| `make models` | Download base.en + medium.en + large-v3 models |
-| `make models-large-turbo-q5` | Download large-v3-turbo-q5 (recommended) |
-
-## Project Structure
-
-```
-Sources/Speak/
-├── App/              HotkeyManager, StatusBarController, SpeakApp
-├── Audio/            AudioEngine, RingBuffer, VoiceActivityDetector
-├── Whisper/          WhisperContext, ModelManager, ModelDownloader, WhisperSettings
-├── Pipeline/         TranscriptionPipeline
-├── UI/               SettingsView, RecordingOverlay, OnboardingView
-├── Utils/            TextOutput, PerformanceMonitor, LoginItemManager
-└── Benchmark/        BenchmarkRunner, BenchmarkView
-```
-
-## Models
-
-Models are stored in `~/Library/Application Support/Speak/models/`. Download via the app settings or CLI:
-
-| Model | Size | Speed (5s audio on M1) |
-|-------|------|----------------------|
-| tiny.en | 75 MB | ~0.15s |
-| base.en | 142 MB | ~0.3s |
-| small.en | 466 MB | ~0.8s |
-| large-v3-turbo-q5 | 547 MB | ~0.5s |
-| medium.en | 1.5 GB | ~2.5s |
-| large-v3 | 2.9 GB | ~5s |
 
 ## Linux (Hyprland)
 
@@ -145,4 +112,4 @@ Written by Claude Opus 4.6 in team mode — architecture, research, and implemen
 
 ## License
 
-whisper.cpp is MIT licensed. This project wraps it with a native macOS interface.
+Parakeet TDT 0.6B v2 is by NVIDIA, licensed CC-BY-4.0; the Core ML conversion is by FluidInference, CC-BY-4.0.
