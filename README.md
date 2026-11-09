@@ -38,7 +38,7 @@ The encoder takes exactly 15 s. Every dictation is padded to that window and its
 
 ### Claude Code in kitty
 
-F11 finds the most recently focused kitty tab running `claude` — wherever your focus is — pastes the transcript there and presses Return, over kitty's remote control socket. Add to `~/.config/kitty/kitty.conf`:
+F11 (kitty 0.30 or newer) finds the most recently focused kitty tab running `claude` — wherever your focus is — pastes the transcript there and presses Return, over kitty's remote control socket. Add to `~/.config/kitty/kitty.conf`:
 
 ```
 allow_remote_control socket-only

@@ -32,7 +32,7 @@ enum Claude {
 
     @discardableResult
     private static func call(_ socket: String, _ command: String, _ payload: [String: String]) throws -> [String: Any] {
-        let request = try JSONSerialization.data(withJSONObject: ["cmd": command, "version": [0, 41, 1], "payload": payload] as [String: Any], options: .withoutEscapingSlashes)
+        let request = try JSONSerialization.data(withJSONObject: ["cmd": command, "version": [0, 30, 0], "payload": payload] as [String: Any], options: .withoutEscapingSlashes)
         let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         defer { close(fd) }
         var timeout = timeval(tv_sec: 1, tv_usec: 0)
